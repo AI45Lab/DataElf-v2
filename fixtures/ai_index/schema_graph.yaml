@@ -1,0 +1,22 @@
+domain: ai_index
+object_types:
+  - Scholar
+  - Paper
+  - Institution
+  - Field
+  - Venue
+relation_types:
+  - AUTHORED_BY
+  - AFFILIATED_WITH
+  - PUBLISHED_IN
+  - WORKS_ON
+  - HAS_PAPER
+  - HAS_SCHOLAR
+  - RELATED_TO_FIELD
+capabilities:
+  search:
+    - institution
+    - paper
+    - scholar
+  analysis:
+    - institution_hotness_growth
