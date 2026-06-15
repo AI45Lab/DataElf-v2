@@ -5,14 +5,21 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+DEFAULT_AI_INDEX_BASE_URL = "https://index.shlab.org.cn/api/v2"
+DEFAULT_AI_INDEX_API_KEY = "ak_0XWHy2OQpSKnaKHL"
+
 
 class DataElfConfig(BaseModel):
     workspace_dir: Path = Field(default_factory=lambda: Path(".dataelf"))
     sqlite_path: Path = Field(default_factory=lambda: Path(".dataelf/dataelf.sqlite"))
     raw_dir: Path = Field(default_factory=lambda: Path(".dataelf/raw"))
+    workspaces_dir: Path = Field(default_factory=lambda: Path(".dataelf/workspaces"))
     fixtures_dir: Path = Field(default_factory=lambda: Path("fixtures/ai_index"))
     skills_dir: Path = Field(default_factory=lambda: Path("skills"))
     model: str = "openai:gpt-5.4"
+    ai_index_mode: str = "fixture"
+    ai_index_base_url: str = DEFAULT_AI_INDEX_BASE_URL
+    ai_index_api_key: str = DEFAULT_AI_INDEX_API_KEY
 
     @classmethod
     def from_env(cls) -> "DataElfConfig":
@@ -21,33 +28,16 @@ class DataElfConfig(BaseModel):
             workspace_dir=workspace,
             sqlite_path=workspace / "dataelf.sqlite",
             raw_dir=workspace / "raw",
+            workspaces_dir=workspace / "workspaces",
             fixtures_dir=Path(os.getenv("DATAELF_FIXTURES_DIR", "fixtures/ai_index")),
             skills_dir=Path(os.getenv("DATAELF_SKILLS_DIR", "skills")),
             model=os.getenv("DATAELF_MODEL", "openai:gpt-5.4"),
+            ai_index_mode=os.getenv("DATAELF_AI_INDEX_MODE", "fixture"),
+            ai_index_base_url=os.getenv("AI_INDEX_BASE_URL", DEFAULT_AI_INDEX_BASE_URL),
+            ai_index_api_key=os.getenv("AI_INDEX_API_KEY", DEFAULT_AI_INDEX_API_KEY),
         )
 
     def ensure_dirs(self) -> None:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
-
-
-def apply_llm_env_aliases() -> None:
-    if os.getenv("DATAELF_API_KEY") and not os.getenv("OPENAI_API_KEY"):
-        os.environ["OPENAI_API_KEY"] = os.environ["DATAELF_API_KEY"]
-    if os.getenv("DATAELF_BASE_URL") and not os.getenv("OPENAI_BASE_URL"):
-        os.environ["OPENAI_BASE_URL"] = os.environ["DATAELF_BASE_URL"]
-
-
-def validate_model_env(model: str) -> None:
-    if model.startswith("ollama:"):
-        return
-    if model.startswith("openai:") and not os.getenv("OPENAI_API_KEY") and not os.getenv("DATAELF_API_KEY"):
-        raise RuntimeError(
-            "DeepAgentsAdapter requires a tool-calling model.\n"
-            "Set DATAELF_MODEL, for example:\n"
-            '  export DATAELF_MODEL="openai:gpt-5.4"\n'
-            '  export OPENAI_API_KEY="..."\n'
-            "For an OpenAI-compatible endpoint, also set OPENAI_BASE_URL or DATAELF_BASE_URL.\n"
-            "Or use another Deep Agents supported provider, such as google_genai, "
-            "anthropic, openrouter, fireworks, baseten, or ollama."
-        )
+        self.workspaces_dir.mkdir(parents=True, exist_ok=True)

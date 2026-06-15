@@ -8,15 +8,14 @@ from rich.console import Console
 from rich.table import Table
 
 from dataelf.config import DataElfConfig
-from dataelf.connectors.ai_index_fixture import FixtureAIIndexConnector
+from dataelf.discovery.workflow import run_discovery
 from dataelf.stores.sqlite_store import SQLiteStore
 from dataelf.tools.registry import list_tool_specs
-from dataelf.workflow import run_task
 
-app = typer.Typer(help="DataElf M1 CLI demo")
-task_app = typer.Typer(help="Inspect task outputs")
+app = typer.Typer(help="DataElf Insight Discovery CLI")
+job_app = typer.Typer(help="Inspect discovery jobs")
 tools_app = typer.Typer(help="Inspect DataElf tools")
-app.add_typer(task_app, name="task")
+app.add_typer(job_app, name="job")
 app.add_typer(tools_app, name="tools")
 console = Console()
 
@@ -45,109 +44,69 @@ def init() -> None:
     console.print(f"Initialized DataElf workspace: [bold]{config.workspace_dir.resolve()}[/bold]")
     console.print(f"SQLite: {config.sqlite_path.resolve()}")
     console.print(f"Raw cache: {config.raw_dir.resolve()}")
+    console.print(f"Discovery workspaces: {config.workspaces_dir.resolve()}")
 
 
 @app.command()
-def seed(fixtures_dir: Path = typer.Argument(Path("fixtures/ai_index"))) -> None:
-    """Validate fixture data and record fixture source metadata."""
-    config = _config()
-    config.fixtures_dir = fixtures_dir
-    config.ensure_dirs()
-    store = _store(config)
-    connector = FixtureAIIndexConnector(fixtures_dir)
-    counts = connector.validate()
-    store.add_trace_event("fixture_seed", "fixture_seeded", {"fixtures_dir": str(fixtures_dir), "counts": counts})
-    store.close()
-    console.print(f"Seeded fixture metadata from [bold]{fixtures_dir}[/bold]")
-    console.print(counts)
-
-
-@app.command()
-def run(query: str) -> None:
-    """Run a DataElf research task."""
+def discover(query: str) -> None:
+    """Run a user-triggered insight discovery job."""
     _setup_logging()
     config = _config()
     try:
-        task_state = run_task(query, config)
+        job = run_discovery(query, config)
     except Exception as exc:
-        console.print(f"[red]DataElf run failed:[/red] {exc}")
+        console.print(f"[red]DataElf discover failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    store = _store(config)
-    report = store.get_latest_report(task_state.task_id)
-    evidence = store.list_evidence(task_state.task_id)
-    top_line = ""
-    for item in evidence:
-        if "OpenAgent Lab" in item.summary or item.payload.get("name") == "OpenAgent Lab":
-            top_line = "Top institution: OpenAgent Lab"
-            break
-    console.print(f"[green]Task completed:[/green] {task_state.task_id}")
-    if top_line:
-        console.print(top_line)
-    if report:
-        console.print(f"Report: dataelf task report {task_state.task_id}")
-    console.print(f"Evidence: dataelf task evidence {task_state.task_id}")
-    console.print(f"Trace: dataelf task trace {task_state.task_id}")
+    console.print(f"[green]Discovery job completed:[/green] {job.job_id}")
+    console.print(f"Workspace: {Path(job.workspace_path).resolve()}")
+    console.print(f"Insights: dataelf job insights {job.job_id}")
+    console.print(f"Brief: dataelf job brief {job.job_id}")
+    console.print(f"Review: dataelf job review {job.job_id}")
+    console.print(f"Logs: dataelf job logs {job.job_id}")
+
+
+@job_app.command("workspace")
+def job_workspace(job_id: str) -> None:
+    """Show a discovery job workspace path."""
+    store = _store(_config())
+    job = store.get_discovery_job(job_id)
+    if not job:
+        console.print(f"[yellow]No discovery job found:[/yellow] {job_id}")
+    else:
+        console.print(Path(job.workspace_path).resolve())
     store.close()
 
 
-@task_app.command("logs")
-def task_logs(task_id: str) -> None:
-    """Show workflow and runtime trace events for a task."""
+@job_app.command("insights")
+def job_insights(job_id: str) -> None:
+    """Show a discovery job's insight_candidates.json."""
+    _print_job_file(job_id, "insights/insight_candidates.json")
+
+
+@job_app.command("brief")
+def job_brief(job_id: str) -> None:
+    """Show a discovery job's final brief."""
+    _print_job_file(job_id, "insights/final_brief.md")
+
+
+@job_app.command("review")
+def job_review(job_id: str) -> None:
+    """Show a discovery job's quality review."""
+    _print_job_file(job_id, "reviews/quality_review.json")
+
+
+@job_app.command("logs")
+def job_logs(job_id: str) -> None:
+    """Show workflow logs for a discovery job."""
     store = _store(_config())
-    events = store.list_trace_events(task_id)
-    table = Table(title=f"Logs: {task_id}")
+    events = store.list_trace_events(job_id)
+    table = Table(title=f"Job Logs: {job_id}")
     table.add_column("time")
     table.add_column("event")
     table.add_column("payload")
     for event in events:
         table.add_row(event["created_at"], event["event_type"], str(event["payload"]))
-    console.print(table)
-    store.close()
-
-
-@task_app.command("evidence")
-def task_evidence(task_id: str) -> None:
-    """Show evidence items for a task."""
-    store = _store(_config())
-    evidence = store.list_evidence(task_id)
-    table = Table(title=f"Evidence: {task_id}")
-    table.add_column("evidence_id")
-    table.add_column("type")
-    table.add_column("title")
-    table.add_column("summary")
-    table.add_column("source_ids")
-    for item in evidence:
-        table.add_row(item.evidence_id, item.evidence_type, item.title, item.summary, ", ".join(item.source_ids))
-    console.print(table)
-    store.close()
-
-
-@task_app.command("report")
-def task_report(task_id: str) -> None:
-    """Show the final markdown report for a task."""
-    store = _store(_config())
-    report = store.get_latest_report(task_id)
-    if not report:
-        console.print(f"[yellow]No report found for task:[/yellow] {task_id}")
-    else:
-        console.print(report.markdown)
-    store.close()
-
-
-@task_app.command("trace")
-def task_trace(task_id: str) -> None:
-    """Show DataElf tool calls for a task."""
-    store = _store(_config())
-    calls = store.list_tool_calls(task_id)
-    table = Table(title=f"Tool Trace: {task_id}")
-    table.add_column("tool")
-    table.add_column("status")
-    table.add_column("started_at")
-    table.add_column("ended_at")
-    table.add_column("error")
-    for call in calls:
-        table.add_row(call["tool_name"], call["status"], call["started_at"], call["ended_at"] or "", call["error"] or "")
     console.print(table)
     store.close()
 
@@ -162,3 +121,18 @@ def tools_list() -> None:
     for spec in list_tool_specs():
         table.add_row(spec.name, spec.permission, spec.description)
     console.print(table)
+
+
+def _print_job_file(job_id: str, relative_path: str) -> None:
+    store = _store(_config())
+    job = store.get_discovery_job(job_id)
+    if not job:
+        console.print(f"[yellow]No discovery job found:[/yellow] {job_id}")
+        store.close()
+        return
+    path = Path(job.workspace_path) / relative_path
+    if not path.exists():
+        console.print(f"[yellow]Missing job artifact:[/yellow] {path}")
+    else:
+        console.print(path.read_text(encoding="utf-8"))
+    store.close()

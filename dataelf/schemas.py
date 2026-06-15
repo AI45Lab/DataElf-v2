@@ -15,20 +15,45 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:12]}"
 
 
-class TaskState(BaseModel):
-    task_id: str
-    user_query: str
-    domain: str = "ai_index"
-    intent: dict[str, Any] = Field(default_factory=dict)
+class DiscoveryJob(BaseModel):
+    job_id: str
+    trigger_type: Literal["user", "monitor"] = "user"
+    job_type: str = "user_requested_discovery"
+    seed_query: str | None = None
+    trigger_event_id: str | None = None
+    trigger_event: dict[str, Any] | None = None
+    scope: dict[str, Any] = Field(default_factory=dict)
+    constraints: dict[str, Any] = Field(default_factory=dict)
     status: Literal["created", "running", "completed", "failed"] = "created"
+    workspace_path: str
+    insight_candidate_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)
-    artifacts: list[str] = Field(default_factory=list)
-    tool_call_ids: list[str] = Field(default_factory=list)
-    evidence_ids: list[str] = Field(default_factory=list)
-    claim_ids: list[str] = Field(default_factory=list)
-    report_id: str | None = None
     error: str | None = None
+
+
+class InsightCandidate(BaseModel):
+    insight_id: str
+    title: str
+    thesis: str
+    why_now: str
+    supporting_signals: list[str] = Field(default_factory=list)
+    analysis_artifacts: list[str] = Field(default_factory=list)
+    related_entities: list[str] = Field(default_factory=list)
+    external_support: list[dict[str, Any]] = Field(default_factory=list)
+    counterarguments: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+    next_questions: list[str] = Field(default_factory=list)
+
+
+class QualityReviewResult(BaseModel):
+    review_id: str
+    job_id: str
+    review_status: Literal["pass", "pass_with_warnings", "failed"] = "pass_with_warnings"
+    warnings: list[str] = Field(default_factory=list)
+    recommended_revision: bool = False
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=now_utc)
 
 
 class ToolSpec(BaseModel):
@@ -39,26 +64,9 @@ class ToolSpec(BaseModel):
     permission: Literal["read", "write", "analyze"]
 
 
-class ToolCall(BaseModel):
-    tool_call_id: str
-    task_id: str
-    tool_name: str
-    input: dict[str, Any]
-    started_at: datetime = Field(default_factory=now_utc)
-    ended_at: datetime | None = None
-    status: Literal["running", "success", "failed"] = "running"
-    output_preview: str | None = None
-    error: str | None = None
-
-
-class ToolResult(BaseModel):
-    tool_call_id: str
-    output: dict[str, Any]
-
-
 class RawArtifact(BaseModel):
     raw_id: str
-    task_id: str
+    job_id: str
     connector: str
     endpoint: str
     request: dict[str, Any]
@@ -69,9 +77,9 @@ class RawArtifact(BaseModel):
 
 class RecordEnvelope(BaseModel):
     record_id: str
-    task_id: str
+    job_id: str
     source: str
-    source_type: Literal["scholar", "paper", "institution", "news", "metric"]
+    source_type: str
     source_id: str
     observed_at: datetime = Field(default_factory=now_utc)
     payload: dict[str, Any]
@@ -80,8 +88,9 @@ class RecordEnvelope(BaseModel):
 
 class DomainObject(BaseModel):
     object_id: str
-    task_id: str
-    object_type: Literal["Scholar", "Paper", "Institution", "Field", "Venue"]
+    job_id: str
+    domain: str
+    object_type: str
     name: str
     properties: dict[str, Any] = Field(default_factory=dict)
     source_record_ids: list[str] = Field(default_factory=list)
@@ -89,47 +98,10 @@ class DomainObject(BaseModel):
 
 class DomainRelation(BaseModel):
     relation_id: str
-    task_id: str
-    relation_type: Literal[
-        "AUTHORED_BY",
-        "AFFILIATED_WITH",
-        "PUBLISHED_IN",
-        "WORKS_ON",
-        "HAS_PAPER",
-        "HAS_SCHOLAR",
-        "RELATED_TO_FIELD",
-    ]
+    job_id: str
+    domain: str
+    relation_type: str
     source_object_id: str
     target_object_id: str
     properties: dict[str, Any] = Field(default_factory=dict)
     source_record_ids: list[str] = Field(default_factory=list)
-
-
-class Evidence(BaseModel):
-    evidence_id: str
-    task_id: str
-    title: str
-    evidence_type: Literal["record", "object", "relation", "metric", "aggregate"]
-    summary: str
-    payload: dict[str, Any]
-    source_ids: list[str] = Field(default_factory=list)
-    created_by_tool_call_id: str | None = None
-    confidence: float = 1.0
-
-
-class Claim(BaseModel):
-    claim_id: str
-    task_id: str
-    text: str
-    evidence_ids: list[str] = Field(default_factory=list)
-    verification_status: Literal["unchecked", "supported", "unsupported"] = "unchecked"
-
-
-class Report(BaseModel):
-    report_id: str
-    task_id: str
-    title: str
-    markdown: str
-    claim_ids: list[str] = Field(default_factory=list)
-    evidence_ids: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=now_utc)

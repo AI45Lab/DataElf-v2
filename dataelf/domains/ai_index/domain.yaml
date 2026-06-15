@@ -1,0 +1,60 @@
+domain: ai_index
+display_name: AI 科技情报
+
+entities:
+  Paper:
+    table: papers
+    id_field: paper_id
+    name_field: title
+  Institution:
+    table: institutions
+    id_field: institution_id
+    name_field: name
+  Scholar:
+    table: scholars
+    id_field: scholar_id
+    name_field: display_name
+  FundingEvent:
+    table: funding
+    id_field: funding_id
+    name_field: title
+
+relations:
+  Paper.AUTHORED_BY.Scholar:
+    table: paper_author
+    source_field: paper_id
+    target_field: scholar_id
+  Paper.AFFILIATED_WITH.Institution:
+    table: paper_institution
+    source_field: paper_id
+    target_field: institution_id
+  Scholar.AFFILIATED_WITH.Institution:
+    table: scholar_institution
+    source_field: scholar_id
+    target_field: institution_id
+
+tools:
+  - search_papers
+  - search_scholars
+  - search_institutions
+  - fetch_institution_funding
+
+workspace_tables:
+  - papers.csv
+  - institutions.csv
+  - scholars.csv
+  - funding.csv
+  - paper_author.csv
+  - paper_institution.csv
+  - scholar_institution.csv
+  - source_observations.csv
+  - external_findings.csv
+
+default_discovery_strategies:
+  - topic_growth
+  - institution_ranking_jump
+  - citation_velocity
+  - benchmark_emergence
+  - scholar_activity_shift
+  - cross_source_signal
+

@@ -4,12 +4,12 @@ from dataelf.schemas import ToolSpec
 
 
 TOOL_SPECS = [
-    ToolSpec(name="search_records", description="Search AI Index fixture records.", input_schema={}, output_schema={}, permission="read"),
-    ToolSpec(name="fetch_records", description="Fetch AI Index fixture records by IDs.", input_schema={}, output_schema={}, permission="read"),
-    ToolSpec(name="model_records", description="Convert records to domain objects and relations.", input_schema={}, output_schema={}, permission="write"),
-    ToolSpec(name="analyze_trend", description="Analyze institution hotness growth.", input_schema={}, output_schema={}, permission="analyze"),
-    ToolSpec(name="write_evidence", description="Write an evidence item.", input_schema={}, output_schema={}, permission="write"),
-    ToolSpec(name="draft_report", description="Save claims and markdown report.", input_schema={}, output_schema={}, permission="write"),
+    ToolSpec(name="search_papers", description="Search AI Index papers for discovery.", input_schema={}, output_schema={}, permission="read"),
+    ToolSpec(name="search_institutions", description="Search AI Index institutions for discovery.", input_schema={}, output_schema={}, permission="read"),
+    ToolSpec(name="search_scholars", description="Search AI Index scholars for discovery.", input_schema={}, output_schema={}, permission="read"),
+    ToolSpec(name="fetch_institution_funding", description="Fetch an institution funding profile from AI Index.", input_schema={}, output_schema={}, permission="read"),
+    ToolSpec(name="web_search", description="Optional external web search for discovery context.", input_schema={}, output_schema={}, permission="read"),
+    ToolSpec(name="fetch_url", description="Optional URL fetch for external source observations.", input_schema={}, output_schema={}, permission="read"),
 ]
 
 

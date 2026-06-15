@@ -1,0 +1,2 @@
+"""AI Index domain pack."""
+

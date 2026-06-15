@@ -1,12 +1,19 @@
-# DataElf M1 CLI Demo
+# DataElf M1 Insight Discovery Runtime
 
-DataElf M1 is a minimal evidence-grounded data research runtime for AI science intelligence. The demo uses AI Index fixture data and keeps the system boundary explicit:
+DataElf M1 is a user-triggered Insight Discovery runtime for AI science intelligence.
 
 ```text
-DataElf CLI -> LangGraph workflow -> DeepAgentsAdapter -> DataElf tools -> SQLite/raw cache/evidence/report
+dataelf discover
+  -> DiscoveryJob
+  -> DiscoveryWorkflow
+  -> AI Index domain pack
+  -> job workspace
+  -> insights_explore adapter
+  -> raw AI Index responses + CSV tables
+  -> candidate_signals.json / insight_candidates.json / final_brief.md
 ```
 
-Deep Agents can plan and choose tool calls, but it can only access data through DataElf tool wrappers.
+The current M1 keeps `insights_explore` as one replaceable adapter boundary, but does not add a factory or multi-framework switching. If the team changes frameworks later, replace the concrete adapter while preserving the `DiscoveryJob -> workspace artifacts` contract.
 
 ## Setup
 
@@ -15,48 +22,82 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
-Configure a tool-calling model:
+Fixture mode is the default:
 
 ```bash
-export DATAELF_MODEL="openai:gpt-5.4"
-export OPENAI_API_KEY="..."
+export DATAELF_AI_INDEX_MODE="fixture"
 ```
 
-For an OpenAI-compatible endpoint:
+To use the live AI Index OpenAPI:
 
 ```bash
-export DATAELF_MODEL="openai:claude-sonnet-4-6-thinking"
-export OPENAI_BASE_URL="https://api.boyuerichdata.opensphereai.com/v1"
-export OPENAI_API_KEY="..."
+export DATAELF_AI_INDEX_MODE="api"
+export AI_INDEX_BASE_URL="https://index.shlab.org.cn/api/v2"
+export AI_INDEX_API_KEY="..."
 ```
 
 ## Run
 
 ```bash
 dataelf init
-dataelf seed fixtures/ai_index
-dataelf run "分析最近半年 AI Agent 领域热度上升最快的机构，并给出证据"
-dataelf task report <task_id>
-dataelf task evidence <task_id>
-dataelf task trace <task_id>
-dataelf task logs <task_id>
+dataelf discover "围绕 Agentic LLMs，基于 AI Index 和联网搜索，发现最近值得关注的 3 个 insight"
+dataelf job workspace <job_id>
+dataelf job insights <job_id>
+dataelf job brief <job_id>
+dataelf job review <job_id>
+dataelf job logs <job_id>
 ```
 
-Expected output includes a task id, a final markdown report, evidence IDs, and a tool trace similar to:
+## Discovery Workspace
+
+Each job creates:
 
 ```text
-search_records -> success
-fetch_records -> success
-model_records -> success
-analyze_trend -> success
-write_evidence -> success
-draft_report -> success
+.dataelf/workspaces/<job_id>/
+  raw/ai_index/
+  raw/web/
+  domains/ai_index/tables/
+  domains/ai_index/domain/
+  scripts/
+  notes/
+  deep_dives/
+  insights/
+  reviews/
 ```
 
-## Notes
+Key files:
 
-- Current data comes from local AI Index fixtures, not the real AI Index API.
-- SQLite is the demo system of record.
-- Raw connector responses are cached under `.dataelf/raw/`.
-- The verifier currently checks evidence coverage and lineage presence; it does not judge real-world factual correctness.
-- Production CLI does not fall back to a fake research loop. Tests monkeypatch `deepagents.create_deep_agent` only to validate the adapter contract.
+```text
+insights/candidate_signals.json
+insights/insight_candidates.json
+insights/final_brief.md
+reviews/quality_review.json
+workspace_index.json
+```
+
+AI Index scripts can import:
+
+```python
+from dataelf.domains.ai_index.client import AIIndexClient
+
+client = AIIndexClient.from_env(workspace_path=".dataelf/workspaces/<job_id>")
+papers = client.search_papers(sub_domains=["Agentic LLMs"], sort_type="heat", page=1, size=50)
+papers_df = client.to_dataframe("papers", papers)
+client.save_table("papers", papers_df)
+```
+
+## AI Index API
+
+The AI Index connector supports:
+
+- `POST /openapi/paper/search`
+- `POST /openapi/institutions/search`
+- `POST /openapi/scholar/search`
+- `GET /openapi/institutions/:institution_id/funding-profile`
+
+The default production base URL in code is `https://index.shlab.org.cn/api/v2`; override it with `AI_INDEX_BASE_URL`.
+
+## Team Handoff
+
+- Intern A can focus on `dataelf/discovery/insights_explorer.py`.
+- Intern B can focus on `dataelf/domains/ai_index/domain.yaml`, `table_builder.py`, and future mapper/normalizer modules.
