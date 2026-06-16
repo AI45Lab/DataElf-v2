@@ -142,6 +142,8 @@ TABLE_SCHEMAS: dict[str, list[str]] = {
         "target_type",
         "source_raw",
     ],
+    "source_observations": ["source_id", "source_type", "title", "url", "observed_at", "summary", "related_entities", "source_raw"],
+    "external_findings": ["finding_id", "source_id", "finding_type", "summary", "supports", "challenges", "confidence", "url", "source_raw"],
 }
 
 
@@ -482,7 +484,7 @@ def normalize_funding_response(response: dict[str, Any], institution_id: str) ->
 
 
 def write_tables(workspace_path: Path, tables: dict[str, list[dict[str, Any]]], append: bool = True) -> None:
-    tables_dir = workspace_path / "domains" / "ai_index" / "tables"
+    tables_dir = workspace_path / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
     for name, rows in tables.items():
         path = tables_dir / f"{name}.csv"
@@ -492,8 +494,13 @@ def write_tables(workspace_path: Path, tables: dict[str, list[dict[str, Any]]], 
         _write_csv(path, unique, table_name=name)
 
 
+def ensure_table_schemas(workspace_path: Path) -> None:
+    for name in TABLE_SCHEMAS:
+        _write_csv(workspace_path / "tables" / f"{name}.csv", [], table_name=name)
+
+
 def read_table(workspace_path: Path, name: str) -> list[dict[str, str]]:
-    return _read_csv(workspace_path / "domains" / "ai_index" / "tables" / f"{name}.csv")
+    return _read_csv(workspace_path / "tables" / f"{name}.csv")
 
 
 def _items(response: dict[str, Any]) -> list[dict[str, Any]]:

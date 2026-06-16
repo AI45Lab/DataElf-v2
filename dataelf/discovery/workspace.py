@@ -3,17 +3,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from dataelf.domains.ai_index.table_builder import ensure_table_schemas
+
 
 WORKSPACE_DIRS = [
     "raw/ai_index",
     "raw/web",
-    "domains/ai_index/tables",
-    "domains/ai_index/domain",
+    "tables",
     "scripts",
     "notes",
     "deep_dives",
     "insights",
+    "prompts",
+    "logs",
     "reviews",
+    "domain",
+    ".deepagents/agents",
 ]
 
 
@@ -33,8 +38,9 @@ def prepare_workspace(workspace_path: Path, domain: str = "ai_index") -> Path:
     _write_text_if_missing(workspace_path / "notes" / "hypotheses.md", "# Hypotheses\n")
     _write_text_if_missing(workspace_path / "notes" / "anomalies.md", "# Anomalies\n")
     _write_text_if_missing(workspace_path / "notes" / "search_summary.md", "# Search Summary\n")
-    _write_text_if_missing(workspace_path / "domains" / domain / "domain" / "objects.jsonl", "")
-    _write_text_if_missing(workspace_path / "domains" / domain / "domain" / "relations.jsonl", "")
+    _write_text_if_missing(workspace_path / "domain" / "objects.jsonl", "")
+    _write_text_if_missing(workspace_path / "domain" / "relations.jsonl", "")
+    ensure_table_schemas(workspace_path)
     return workspace_path
 
 
@@ -46,4 +52,3 @@ def _write_json_if_missing(path: Path, payload: dict) -> None:
 def _write_text_if_missing(path: Path, text: str) -> None:
     if not path.exists():
         path.write_text(text, encoding="utf-8")
-

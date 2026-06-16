@@ -36,6 +36,8 @@ class AIIndexConnector:
         self.fixtures_dir = fixtures_dir or Path("fixtures/ai_index")
         self.workspace_path = workspace_path
         self.timeout_seconds = timeout_seconds
+        self.min_request_interval_seconds = 0.1
+        self._last_request_at = 0.0
         self._fixtures: dict[str, list[dict[str, Any]]] = {}
         if self.mode == "fixture":
             self._fixtures = {
@@ -80,6 +82,7 @@ class AIIndexConnector:
             headers["Content-Type"] = "application/json"
         last_error: Exception | None = None
         for attempt in range(3):
+            self._respect_rate_limit()
             req = request.Request(url, data=body, headers=headers, method=method)
             try:
                 with request.urlopen(req, timeout=self.timeout_seconds) as response:
@@ -99,6 +102,12 @@ class AIIndexConnector:
                     continue
                 raise RuntimeError(f"AI Index API network error for {endpoint}: {exc}") from exc
         raise RuntimeError(f"AI Index API request failed for {endpoint}: {last_error}")
+
+    def _respect_rate_limit(self) -> None:
+        elapsed = time.monotonic() - self._last_request_at
+        if elapsed < self.min_request_interval_seconds:
+            time.sleep(self.min_request_interval_seconds - elapsed)
+        self._last_request_at = time.monotonic()
 
     def _wrap(self, method: str, endpoint: str, payload: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw, dict) and raw.get("code", 0) not in (0, "0"):
@@ -214,4 +223,3 @@ def _fixture_heat(row: dict[str, Any]) -> int:
         return int(heat.get("half_year") or heat.get("month") or 0)
     radar = row.get("index_radar_display") or {}
     return int(radar.get("total_score") or 0)
-

@@ -6,7 +6,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from dataelf.cli import app
-from dataelf.config import DEFAULT_AI_INDEX_API_KEY, DEFAULT_AI_INDEX_BASE_URL, DataElfConfig
+from dataelf.config import DEFAULT_AI_INDEX_API_KEY, DEFAULT_AI_INDEX_BASE_URL, DEFAULT_AI_INDEX_MODE, DataElfConfig
+from dataelf.discovery.base import DiscoveryContext
+from dataelf.discovery.deepagents_code_cli_explorer import DEFAULT_DCODE_EXTRA_ARGS, DEFAULT_SHELL_ALLOW_LIST, DeepAgentsCodeCliInsightsExplorer
 from dataelf.discovery.domain_registry import DomainRegistry
 from dataelf.discovery.quality_review import review_workspace
 from dataelf.discovery.workflow import run_discovery
@@ -15,6 +17,74 @@ from dataelf.domains.ai_index.client import AIIndexClient
 from dataelf.domains.ai_index.connector import AIIndexConnector, AI_INDEX_ENDPOINTS
 from dataelf.domains.ai_index.table_builder import read_table, update_tables_from_response
 from dataelf.stores.sqlite_store import SQLiteStore
+from dataelf.schemas import DiscoveryJob
+
+
+def _write_fake_dcode(tmp_path: Path) -> Path:
+    path = tmp_path / "fake_dcode"
+    path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p insights scripts deep_dives tables raw/web logs
+cat > insights/candidate_signals.json <<'JSON'
+{
+  "candidate_signals": [
+    {
+      "signal_id": "sig_001",
+      "signal_type": "institution_anomaly",
+      "summary": "OpenAgent Lab shows unusual AI agent momentum across papers and funding context.",
+      "why_might_matter": "The signal links institution momentum with research output and external validation needs.",
+      "supporting_tables": ["papers.csv", "institutions.csv", "funding_summary.csv"],
+      "related_entities": ["Institution", "Paper", "FundingEvent"],
+      "suggested_deep_dive": ["Join institution heat with paper clusters"],
+      "initial_score": {"novelty": 0.7, "magnitude": 0.8, "strategic_relevance": 0.75},
+      "status": "needs_deep_dive"
+    }
+  ]
+}
+JSON
+cat > insights/insight_candidates.json <<'JSON'
+{
+  "insight_candidates": [
+    {
+      "insight_id": "ins_001",
+      "title": "Agentic LLM momentum is clustering around execution-capable institutions",
+      "thesis": "The signal combines AI Index paper activity, institution momentum, and a checked external source placeholder rather than a simple ranking.",
+      "why_now": "Recent workspace tables and external validation notes appear together in this run.",
+      "supporting_signals": ["sig_001"],
+      "analysis_artifacts": ["scripts/analyze_signal.py", "deep_dives/sig_001.md"],
+      "related_entities": ["Topic:Agentic LLMs", "Institution:OpenAgent Lab", "Paper:Agent Benchmarks"],
+      "external_support": [{"source_id": "web_001", "summary": "External search placeholder for fake dcode test."}],
+      "counterarguments": ["The fake runner does not prove external adoption."],
+      "confidence": 0.61,
+      "next_questions": ["Validate benchmark adoption with live web search."]
+    }
+  ]
+}
+JSON
+cat > insights/final_brief.md <<'MD'
+# Insight Discovery Brief
+
+Fake DeepAgentsCode output for tests.
+MD
+cat > scripts/analyze_signal.py <<'PY'
+print("analysis artifact")
+PY
+cat > deep_dives/sig_001.md <<'MD'
+# sig_001
+
+Deep dive artifact for fake dcode.
+MD
+cat > tables/external_findings.csv <<'CSV'
+finding_id,source_id,finding_type,summary,supports,challenges,confidence,url,source_raw
+finding_001,web_001,web_search,External fake finding,ins_001,,0.5,https://example.com,
+CSV
+echo "fake dcode completed"
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
 
 
 def test_workspace_domain_pack_and_ai_index_client_fixture(tmp_path: Path) -> None:
@@ -32,8 +102,8 @@ def test_workspace_domain_pack_and_ai_index_client_fixture(tmp_path: Path) -> No
     assert read_table(workspace, "papers")
     assert read_table(workspace, "paper_author")
     assert read_table(workspace, "paper_institution")
-    assert (workspace / "domains" / "ai_index" / "tables" / "paper_yearly_counts.csv").exists()
-    assert (workspace / "domains" / "ai_index" / "tables" / "paper_awards.csv").exists()
+    assert (workspace / "tables" / "paper_yearly_counts.csv").exists()
+    assert (workspace / "tables" / "paper_awards.csv").exists()
 
     client.search_scholars(sub_domains=["AI Agent"], sort_type="heat", page=1, size=5)
     client.search_institutions(sub_domains=["AI Agent"], sort_type="heat", page=1, size=5)
@@ -45,7 +115,8 @@ def test_workspace_domain_pack_and_ai_index_client_fixture(tmp_path: Path) -> No
     assert read_table(workspace, "institutions")
     assert read_table(workspace, "funding_summary")[0]["total_funding_value_usd"] == "50000000"
     assert read_table(workspace, "funding")
-    assert (workspace / "domains" / "ai_index" / "tables" / "funding_investors.csv").exists()
+    assert (workspace / "tables" / "funding_investors.csv").exists()
+    assert (workspace / "tables" / "papers.csv").exists()
 
 
 def test_ai_index_table_builder_handles_openapi_shaped_entities(tmp_path: Path) -> None:
@@ -160,7 +231,9 @@ def test_ai_index_table_builder_handles_openapi_shaped_entities(tmp_path: Path) 
     assert read_table(workspace, "funding_investors")[0]["investor_name"] == "Example Capital"
 
 
-def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path) -> None:
+def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path, monkeypatch) -> None:
+    fake_dcode = _write_fake_dcode(tmp_path)
+    monkeypatch.setenv("DATAELF_DCODE_BINARY", str(fake_dcode))
     config = DataElfConfig(
         workspace_dir=tmp_path / ".dataelf",
         sqlite_path=tmp_path / ".dataelf" / "dataelf.sqlite",
@@ -178,7 +251,9 @@ def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path) -> 
     assert (workspace / "insights" / "candidate_signals.json").exists()
     assert (workspace / "insights" / "insight_candidates.json").exists()
     assert (workspace / "insights" / "final_brief.md").exists()
-    assert read_table(workspace, "institutions")
+    assert (workspace / "prompts" / "discovery_prompt.md").exists()
+    assert (workspace / "logs" / "dcode_stdout.log").exists()
+    assert (workspace / ".deepagents" / "agents" / "breadth-scout" / "AGENTS.md").exists()
 
     review = json.loads((workspace / "reviews" / "quality_review.json").read_text(encoding="utf-8"))
     assert review["review_status"] in {"pass", "pass_with_warnings"}
@@ -197,7 +272,20 @@ def test_quality_review_detects_missing_candidates(tmp_path: Path) -> None:
     assert review.recommended_revision
 
 
+def test_deepagents_code_cli_missing_binary_is_clear(tmp_path: Path) -> None:
+    workspace = prepare_workspace(tmp_path / "workspace")
+    job = DiscoveryJob(job_id="job_missing_dcode", workspace_path=str(workspace), seed_query="test")
+    explorer = DeepAgentsCodeCliInsightsExplorer(dcode_binary=str(tmp_path / "missing_dcode"))
+
+    result = explorer.run(job, DiscoveryContext(workspace_path=str(workspace), domain="ai_index"))
+
+    assert result.status == "failed"
+    assert "DeepAgentsCode CLI not found" in (result.error or "")
+    assert "DeepAgentsCode CLI not found" in (workspace / "logs" / "dcode_stderr.log").read_text(encoding="utf-8")
+
+
 def test_cli_discover_smoke(tmp_path: Path, monkeypatch) -> None:
+    fake_dcode = _write_fake_dcode(tmp_path)
     fixtures = tmp_path / "fixtures" / "ai_index"
     fixtures.mkdir(parents=True)
     source = Path(__file__).resolve().parents[1] / "fixtures" / "ai_index"
@@ -206,6 +294,7 @@ def test_cli_discover_smoke(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DATAELF_WORKSPACE", str(tmp_path / ".dataelf"))
     monkeypatch.setenv("DATAELF_FIXTURES_DIR", str(fixtures))
     monkeypatch.setenv("DATAELF_AI_INDEX_MODE", "fixture")
+    monkeypatch.setenv("DATAELF_DCODE_BINARY", str(fake_dcode))
 
     result = CliRunner().invoke(
         app,
@@ -218,6 +307,28 @@ def test_cli_discover_smoke(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_ai_index_api_defaults_match_provided_curl() -> None:
+    assert DEFAULT_AI_INDEX_MODE == "api"
     assert DEFAULT_AI_INDEX_BASE_URL == "https://index.shlab.org.cn/api/v2"
     assert DEFAULT_AI_INDEX_API_KEY == "ak_0XWHy2OQpSKnaKHL"
     assert AI_INDEX_ENDPOINTS["fetch_institution_funding"] == "/openapi/institutions/{institution_id}/funding-profile"
+
+
+def test_dcode_shell_allow_list_defaults_to_all() -> None:
+    assert DEFAULT_SHELL_ALLOW_LIST == "all"
+    assert DeepAgentsCodeCliInsightsExplorer().shell_allow_list == "all"
+
+
+def test_dcode_extra_args_are_appended_and_agents_are_not_overwritten(tmp_path: Path) -> None:
+    explorer = DeepAgentsCodeCliInsightsExplorer(extra_args='--max-turns 2 --no-mcp')
+    command = explorer._build_command("hello", "openai:gpt-5.5")
+    assert command[-5:] == ["--max-turns", "2", "--no-mcp", "-n", "hello"]
+    assert "--max-turns" in command
+    assert "--no-mcp" in command
+    assert DEFAULT_DCODE_EXTRA_ARGS == ""
+
+    workspace = tmp_path / "workspace"
+    custom_agent = workspace / ".deepagents" / "agents" / "breadth-scout" / "AGENTS.md"
+    custom_agent.parent.mkdir(parents=True)
+    custom_agent.write_text("custom", encoding="utf-8")
+    explorer._init_project_agents(workspace)
+    assert custom_agent.read_text(encoding="utf-8") == "custom"

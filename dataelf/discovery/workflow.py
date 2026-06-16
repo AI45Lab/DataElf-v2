@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from dataelf.config import DataElfConfig
+from dataelf.discovery.base import DiscoveryContext
 from dataelf.discovery.domain_registry import DomainRegistry
-from dataelf.discovery.insights_explorer import DeepAgentsCodeInsightsExplorer
+from dataelf.discovery.deepagents_code_cli_explorer import DeepAgentsCodeCliInsightsExplorer
 from dataelf.discovery.quality_review import review_workspace
+from dataelf.discovery.result_parser import load_insight_candidate_ids
 from dataelf.discovery.workspace import prepare_workspace
 from dataelf.domains.ai_index.client import AIIndexClient
 from dataelf.domains.ai_index.connector import AIIndexConnector
@@ -121,20 +123,32 @@ def build_discovery_workflow():
             workspace_path=Path(job.workspace_path),
         )
         client = AIIndexClient(connector=connector, workspace_path=Path(job.workspace_path))
-        # M1 intentionally wires one concrete insights_explore adapter.
-        # TODO: If the framework changes, replace DeepAgentsCodeInsightsExplorer
-        # here and preserve the workspace artifact contract.
-        explorer = DeepAgentsCodeInsightsExplorer(client=client)
-        state["store"].add_trace_event(job.job_id, "insights_explore_start", {"mode": config.ai_index_mode})
-        updated = explorer.run(job, {"domain_pack": state["domain_pack"], "config": config.model_dump(mode="json")})
-        updated.updated_at = now_utc()
-        state["store"].save_discovery_job(updated)
-        state["store"].add_trace_event(
-            updated.job_id,
-            "insights_explore_completed",
-            {"insight_candidate_ids": updated.insight_candidate_ids},
+        explorer = DeepAgentsCodeCliInsightsExplorer()
+        context = DiscoveryContext(
+            workspace_path=job.workspace_path,
+            domain=job.scope.get("domain", "ai_index"),
+            model=config.model,
+            env={
+                "DATAELF_AI_INDEX_MODE": config.ai_index_mode,
+                "AI_INDEX_BASE_URL": config.ai_index_base_url,
+                "AI_INDEX_API_KEY": config.ai_index_api_key,
+            },
+            domain_pack=state["domain_pack"],
+            config=config.model_dump(mode="json"),
         )
-        return {"job": updated, "client": client}
+        state["store"].add_trace_event(job.job_id, "insights_explore_start", {"mode": config.ai_index_mode})
+        result = explorer.run(job, context)
+        job.insight_candidate_ids = load_insight_candidate_ids(Path(job.workspace_path))
+        job.updated_at = now_utc()
+        if result.status in {"failed", "incomplete"} and result.error:
+            job.error = result.error or "insights_explore_failed"
+        state["store"].save_discovery_job(job)
+        state["store"].add_trace_event(
+            job.job_id,
+            "insights_explore_completed",
+            {"result": result.model_dump(mode="json"), "insight_candidate_ids": job.insight_candidate_ids},
+        )
+        return {"job": job, "client": client}
 
     def quality_review_node(state: dict[str, Any]) -> dict[str, Any]:
         job: DiscoveryJob = state["job"]
@@ -156,7 +170,7 @@ def build_discovery_workflow():
         review = state.get("quality_review", {})
         job.status = "completed" if review.get("review_status") != "failed" else "failed"
         job.updated_at = now_utc()
-        if job.status == "failed":
+        if job.status == "failed" and not job.error:
             job.error = "quality_review_failed"
         state["store"].save_discovery_job(job)
         _write_workspace_index(job, review)

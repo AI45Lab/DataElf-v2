@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,8 @@ class AIIndexClient:
     @classmethod
     def from_env(cls, workspace_path: str | Path | None = None) -> "AIIndexClient":
         config = DataElfConfig.from_env()
-        path = Path(workspace_path) if workspace_path else None
+        env_workspace = os.getenv("DATAELF_JOB_WORKSPACE") or os.getenv("DATAELF_WORKSPACE")
+        path = Path(workspace_path) if workspace_path else Path(env_workspace) if env_workspace else None
         connector = AIIndexConnector(
             mode=config.ai_index_mode,
             base_url=config.ai_index_base_url,
@@ -72,11 +75,23 @@ class AIIndexClient:
             return normalize_scholars_response(response).get("scholars", [])
         return _items(response)
 
-    def save_table(self, table_name: str, data: Any) -> None:
-        if self.workspace_path is None:
+    def save_raw(self, name: str, response: dict[str, Any], workspace_path: str | Path | None = None) -> Path:
+        target_workspace = Path(workspace_path) if workspace_path else self.workspace_path
+        if target_workspace is None:
+            raise ValueError("AIIndexClient.save_raw requires workspace_path.")
+        raw_dir = target_workspace / "raw" / "ai_index"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in name).strip("_") or "ai_index_response"
+        path = raw_dir / f"{safe_name}.json"
+        path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def save_table(self, table_name: str, data: Any, workspace_path: str | Path | None = None) -> None:
+        target_workspace = Path(workspace_path) if workspace_path else self.workspace_path
+        if target_workspace is None:
             raise ValueError("AIIndexClient.save_table requires workspace_path.")
         rows = _rows_from_data(data)
-        write_tables(self.workspace_path, {table_name: rows}, append=True)
+        write_tables(target_workspace, {table_name: rows}, append=True)
 
     def _collect(self, kind: str, max_pages: int, size: int, **kwargs: Any):
         all_rows: list[dict[str, Any]] = []
@@ -104,4 +119,3 @@ def _rows_from_data(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return [dict(row) for row in data]
     raise TypeError("save_table expects a pandas DataFrame or list[dict].")
-

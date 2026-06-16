@@ -8,12 +8,12 @@ dataelf discover
   -> DiscoveryWorkflow
   -> AI Index domain pack
   -> job workspace
-  -> insights_explore adapter
+  -> DeepAgentsCode CLI insights_explore runner
   -> raw AI Index responses + CSV tables
   -> candidate_signals.json / insight_candidates.json / final_brief.md
 ```
 
-The current M1 keeps `insights_explore` as one replaceable adapter boundary, but does not add a factory or multi-framework switching. If the team changes frameworks later, replace the concrete adapter while preserving the `DiscoveryJob -> workspace artifacts` contract.
+The current `insights_explore` uses a DeepAgentsCode CLI runner. This is a Discovery Lab Runner for quickly testing whether DeepAgentsCode can use dynamic AI Index data, web search, and Python analysis to produce deeper insights. It is not the final DataElf-native agent runtime integration. The stable contract is the outer `DiscoveryWorkflow`, `DiscoveryJob`, workspace layout, and `insight_candidates.json` schema.
 
 ## Setup
 
@@ -22,19 +22,36 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
-Fixture mode is the default:
+Live AI Index API mode is the default. The production base URL and the tested API key are built into the M1 config from the provided curl, so interns do not need extra AI Index exports for the default path.
+
+To force fixture mode for local tests:
 
 ```bash
 export DATAELF_AI_INDEX_MODE="fixture"
 ```
 
-To use the live AI Index OpenAPI:
+To override the live AI Index OpenAPI target:
 
 ```bash
 export DATAELF_AI_INDEX_MODE="api"
 export AI_INDEX_BASE_URL="https://index.shlab.org.cn/api/v2"
 export AI_INDEX_API_KEY="..."
 ```
+
+DeepAgentsCode CLI is required for `dataelf discover`:
+
+```bash
+curl -LsSf https://langch.in/dcode | bash
+export DATAELF_DCODE_BINARY="dcode"  # optional; defaults to dcode
+export DATAELF_DCODE_SHELL_ALLOW_LIST="all"  # optional; defaults to all for M1 testing
+export DATAELF_DCODE_EXTRA_ARGS="--max-turns 40"  # optional; appended before -n
+export DATAELF_MODEL="openai:gpt-5.5"  # optional; if unset, dcode uses its own default model config
+export TAVILY_API_KEY="..."  # optional, enables dcode web_search/fetch_url
+```
+
+Configure LLM provider credentials in DeepAgentsCode or in the shell environment before running DataElf. DataElf forwards the current environment to the child process, but it does not own provider auth. If `DATAELF_MODEL` is set, DataElf passes it to `dcode --model`; otherwise dcode uses its own default model config. For example, use `dcode auth set openai` or export provider variables such as `OPENAI_API_KEY` / `OPENAI_BASE_URL` according to your DeepAgentsCode provider setup.
+
+If `dcode` is not installed or not on `PATH`, DataElf fails clearly and writes details to `workspace/logs/dcode_stderr.log`.
 
 ## Run
 
@@ -56,13 +73,15 @@ Each job creates:
 .dataelf/workspaces/<job_id>/
   raw/ai_index/
   raw/web/
-  domains/ai_index/tables/
-  domains/ai_index/domain/
+  tables/
   scripts/
   notes/
   deep_dives/
   insights/
+  prompts/
+  logs/
   reviews/
+  .deepagents/agents/
 ```
 
 Key files:
@@ -71,6 +90,9 @@ Key files:
 insights/candidate_signals.json
 insights/insight_candidates.json
 insights/final_brief.md
+prompts/discovery_prompt.md
+logs/dcode_stdout.log
+logs/dcode_stderr.log
 reviews/quality_review.json
 workspace_index.json
 ```
@@ -80,10 +102,11 @@ AI Index scripts can import:
 ```python
 from dataelf.domains.ai_index.client import AIIndexClient
 
-client = AIIndexClient.from_env(workspace_path=".dataelf/workspaces/<job_id>")
+client = AIIndexClient.from_env()
 papers = client.search_papers(sub_domains=["Agentic LLMs"], sort_type="heat", page=1, size=50)
 papers_df = client.to_dataframe("papers", papers)
 client.save_table("papers", papers_df)
+client.save_raw("papers_agentic_llms_page_1", papers)
 ```
 
 ## AI Index API
@@ -99,5 +122,5 @@ The default production base URL in code is `https://index.shlab.org.cn/api/v2`; 
 
 ## Team Handoff
 
-- Intern A can focus on `dataelf/discovery/insights_explorer.py`.
+- Intern A can focus on `dataelf/discovery/prompt_builder.py` and dcode-native config. DataElf scaffolds `.deepagents/agents/*/AGENTS.md` only when missing, so workspace-level agent edits are not overwritten on reruns.
 - Intern B can focus on `dataelf/domains/ai_index/domain.yaml`, `table_builder.py`, and future mapper/normalizer modules.

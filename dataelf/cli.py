@@ -58,12 +58,18 @@ def discover(query: str) -> None:
         console.print(f"[red]DataElf discover failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    console.print(f"[green]Discovery job completed:[/green] {job.job_id}")
-    console.print(f"Workspace: {Path(job.workspace_path).resolve()}")
-    console.print(f"Insights: dataelf job insights {job.job_id}")
-    console.print(f"Brief: dataelf job brief {job.job_id}")
+    status_style = "green" if job.status == "completed" else "red"
+    console.print(f"[{status_style}]Discovery job {job.status}:[/{status_style}] {job.job_id}")
+    workspace = Path(job.workspace_path).resolve()
+    console.print(f"Workspace: {workspace}")
+    console.print(f"Insight candidates: {workspace / 'insights' / 'insight_candidates.json'}")
+    console.print(f"Final brief: {workspace / 'insights' / 'final_brief.md'}")
     console.print(f"Review: dataelf job review {job.job_id}")
     console.print(f"Logs: dataelf job logs {job.job_id}")
+    if job.status == "failed":
+        if job.error:
+            console.print(f"[red]Error:[/red] {job.error}")
+        raise typer.Exit(code=1)
 
 
 @job_app.command("workspace")

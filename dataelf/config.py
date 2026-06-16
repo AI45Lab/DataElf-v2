@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_AI_INDEX_BASE_URL = "https://index.shlab.org.cn/api/v2"
 DEFAULT_AI_INDEX_API_KEY = "ak_0XWHy2OQpSKnaKHL"
+DEFAULT_AI_INDEX_MODE = "api"
 
 
 class DataElfConfig(BaseModel):
@@ -15,9 +16,8 @@ class DataElfConfig(BaseModel):
     raw_dir: Path = Field(default_factory=lambda: Path(".dataelf/raw"))
     workspaces_dir: Path = Field(default_factory=lambda: Path(".dataelf/workspaces"))
     fixtures_dir: Path = Field(default_factory=lambda: Path("fixtures/ai_index"))
-    skills_dir: Path = Field(default_factory=lambda: Path("skills"))
-    model: str = "openai:gpt-5.4"
-    ai_index_mode: str = "fixture"
+    model: str | None = None
+    ai_index_mode: str = DEFAULT_AI_INDEX_MODE
     ai_index_base_url: str = DEFAULT_AI_INDEX_BASE_URL
     ai_index_api_key: str = DEFAULT_AI_INDEX_API_KEY
 
@@ -30,9 +30,8 @@ class DataElfConfig(BaseModel):
             raw_dir=workspace / "raw",
             workspaces_dir=workspace / "workspaces",
             fixtures_dir=Path(os.getenv("DATAELF_FIXTURES_DIR", "fixtures/ai_index")),
-            skills_dir=Path(os.getenv("DATAELF_SKILLS_DIR", "skills")),
-            model=os.getenv("DATAELF_MODEL", "openai:gpt-5.4"),
-            ai_index_mode=os.getenv("DATAELF_AI_INDEX_MODE", "fixture"),
+            model=os.getenv("DATAELF_MODEL"),
+            ai_index_mode=os.getenv("DATAELF_AI_INDEX_MODE", DEFAULT_AI_INDEX_MODE),
             ai_index_base_url=os.getenv("AI_INDEX_BASE_URL", DEFAULT_AI_INDEX_BASE_URL),
             ai_index_api_key=os.getenv("AI_INDEX_API_KEY", DEFAULT_AI_INDEX_API_KEY),
         )
