@@ -13,7 +13,7 @@ from dataelf.discovery.workflow import run_discovery
 from dataelf.discovery.workspace import prepare_workspace
 from dataelf.domains.ai_index.client import AIIndexClient
 from dataelf.domains.ai_index.connector import AIIndexConnector, AI_INDEX_ENDPOINTS
-from dataelf.domains.ai_index.table_builder import read_table
+from dataelf.domains.ai_index.table_builder import read_table, update_tables_from_response
 from dataelf.stores.sqlite_store import SQLiteStore
 
 
@@ -32,6 +32,132 @@ def test_workspace_domain_pack_and_ai_index_client_fixture(tmp_path: Path) -> No
     assert read_table(workspace, "papers")
     assert read_table(workspace, "paper_author")
     assert read_table(workspace, "paper_institution")
+    assert (workspace / "domains" / "ai_index" / "tables" / "paper_yearly_counts.csv").exists()
+    assert (workspace / "domains" / "ai_index" / "tables" / "paper_awards.csv").exists()
+
+    client.search_scholars(sub_domains=["AI Agent"], sort_type="heat", page=1, size=5)
+    client.search_institutions(sub_domains=["AI Agent"], sort_type="heat", page=1, size=5)
+    client.fetch_institution_funding("inst_openagent_lab")
+
+    assert read_table(workspace, "scholars")
+    assert read_table(workspace, "scholar_institution")
+    assert read_table(workspace, "scholar_venues")
+    assert read_table(workspace, "institutions")
+    assert read_table(workspace, "funding_summary")[0]["total_funding_value_usd"] == "50000000"
+    assert read_table(workspace, "funding")
+    assert (workspace / "domains" / "ai_index" / "tables" / "funding_investors.csv").exists()
+
+
+def test_ai_index_table_builder_handles_openapi_shaped_entities(tmp_path: Path) -> None:
+    workspace = prepare_workspace(tmp_path / "workspace")
+    raw_uri = str(workspace / "raw" / "ai_index" / "sample.json")
+
+    update_tables_from_response(
+        workspace,
+        {
+            "endpoint": AI_INDEX_ENDPOINTS["search_papers"],
+            "raw_uri": raw_uri,
+            "data": {
+                "list": [
+                    {
+                        "id": "paper_1",
+                        "title": "Agent Benchmarks",
+                        "first_authors": ["Alice Chen"],
+                        "corresponding_authors": ["Bob Li"],
+                        "institution_id": "inst_1",
+                        "institution": "OpenAgent Lab",
+                        "conference_name": "NeurIPS",
+                        "conference_abbreviation": "NeurIPS",
+                        "count_by_year": [{"year": 2026, "cited_by_count": 42}],
+                        "conf_award_info": {"conf": "NeurIPS", "year": 2026, "awards": [{"key": "spotlight", "title": "Spotlight"}]},
+                    }
+                ]
+            },
+        },
+    )
+    update_tables_from_response(
+        workspace,
+        {
+            "endpoint": AI_INDEX_ENDPOINTS["search_institutions"],
+            "raw_uri": raw_uri,
+            "data": {
+                "list": [
+                    {
+                        "id": "inst_1",
+                        "name": "OpenAgent Lab",
+                        "country_code": "US",
+                        "conference_names": ["NeurIPS"],
+                        "journal_names": ["Nature Machine Intelligence"],
+                        "award_list": [{"conf": "NeurIPS", "year": 2026, "awards": [{"key": "best", "title": "Best Paper"}]}],
+                        "index_radar_display": {"academic_impact": 91, "capital_signal": 80, "total_score": 88},
+                    }
+                ]
+            },
+        },
+    )
+    update_tables_from_response(
+        workspace,
+        {
+            "endpoint": AI_INDEX_ENDPOINTS["search_scholars"],
+            "raw_uri": raw_uri,
+            "data": {
+                "list": [
+                    {
+                        "id": "scholar_1",
+                        "display_name": "Alice Chen",
+                        "institution_id": "inst_1",
+                        "institution": "OpenAgent Lab",
+                        "count_by_year": [{"year": 2026, "cited_by_count": 12}],
+                        "conference_names": ["NeurIPS"],
+                        "award_list": [{"conf": "NeurIPS", "year": 2026, "awards": [{"key": "oral", "title": "Oral"}]}],
+                    }
+                ]
+            },
+        },
+    )
+    update_tables_from_response(
+        workspace,
+        {
+            "endpoint": AI_INDEX_ENDPOINTS["fetch_institution_funding"].format(institution_id="inst_1"),
+            "request": {"institution_id": "inst_1"},
+            "raw_uri": raw_uri,
+            "data": {
+                "summary": {"total_funding": {"currency": "USD", "value": 100, "value_usd": 100}, "funding_round_count": 1},
+                "funding": {
+                    "financials_highlights": {"num_investors": 2, "num_lead_investors": 1},
+                    "funding_rounds": [
+                        {
+                            "id": "round_1",
+                            "uuid": "uuid_1",
+                            "title": "Seed Round",
+                            "announced_on": "2026-01-01",
+                            "money_raised": {"currency": "USD", "value": 100, "value_usd": 100},
+                            "lead_investors": [{"id": "investor_1", "value": "Example Capital"}],
+                        }
+                    ],
+                    "investors": [
+                        {
+                            "id": "record_1",
+                            "type": "investment",
+                            "lead_investor": True,
+                            "funding_round": {"id": "round_1", "value": "Seed Round"},
+                            "investor": {"id": "investor_1", "value": "Example Capital", "type": "organization"},
+                        }
+                    ],
+                },
+                "invested": {"investments": []},
+            },
+        },
+    )
+
+    assert read_table(workspace, "paper_yearly_counts")[0]["cited_by_count"] == "42"
+    assert read_table(workspace, "paper_awards")[0]["award_title"] == "Spotlight"
+    assert read_table(workspace, "institution_venues")[0]["venue_name"] == "NeurIPS"
+    assert read_table(workspace, "institution_awards")[0]["award_title"] == "Best Paper"
+    assert read_table(workspace, "scholar_yearly_counts")[0]["year"] == "2026"
+    assert read_table(workspace, "scholar_awards")[0]["award_key"] == "oral"
+    assert read_table(workspace, "funding_rounds")[0]["funding_id"] == "round_1"
+    assert read_table(workspace, "funding_investors")[0]["investor_name"] == "Example Capital"
 
 
 def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path) -> None:
@@ -95,4 +221,3 @@ def test_ai_index_api_defaults_match_provided_curl() -> None:
     assert DEFAULT_AI_INDEX_BASE_URL == "https://index.shlab.org.cn/api/v2"
     assert DEFAULT_AI_INDEX_API_KEY == "ak_0XWHy2OQpSKnaKHL"
     assert AI_INDEX_ENDPOINTS["fetch_institution_funding"] == "/openapi/institutions/{institution_id}/funding-profile"
-

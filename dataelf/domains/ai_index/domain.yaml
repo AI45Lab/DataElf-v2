@@ -32,6 +32,26 @@ relations:
     table: scholar_institution
     source_field: scholar_id
     target_field: institution_id
+  Paper.YEARLY_METRIC:
+    table: paper_yearly_counts
+    source_field: paper_id
+    target_field: year
+  Scholar.YEARLY_METRIC:
+    table: scholar_yearly_counts
+    source_field: scholar_id
+    target_field: year
+  Institution.HAS_VENUE:
+    table: institution_venues
+    source_field: institution_id
+    target_field: venue_name
+  Scholar.HAS_VENUE:
+    table: scholar_venues
+    source_field: scholar_id
+    target_field: venue_name
+  Institution.HAS_FUNDING_ROUND:
+    table: funding_rounds
+    source_field: institution_id
+    target_field: funding_id
 
 tools:
   - search_papers
@@ -41,12 +61,23 @@ tools:
 
 workspace_tables:
   - papers.csv
-  - institutions.csv
-  - scholars.csv
-  - funding.csv
   - paper_author.csv
   - paper_institution.csv
+  - paper_yearly_counts.csv
+  - paper_awards.csv
+  - institutions.csv
+  - institution_awards.csv
+  - institution_venues.csv
+  - scholars.csv
   - scholar_institution.csv
+  - scholar_yearly_counts.csv
+  - scholar_awards.csv
+  - scholar_venues.csv
+  - funding.csv
+  - funding_summary.csv
+  - funding_rounds.csv
+  - funding_investors.csv
+  - institution_investments.csv
   - source_observations.csv
   - external_findings.csv
 
@@ -57,4 +88,3 @@ default_discovery_strategies:
   - benchmark_emergence
   - scholar_activity_shift
   - cross_source_signal
-
