@@ -24,6 +24,12 @@ uv pip install -e ".[dev]"
 
 Live AI Index API mode is the default. The production base URL and the tested API key are built into the M1 config from the provided curl, so interns do not need extra AI Index exports for the default path.
 
+SQLite job registry is disabled by default. M1 uses workspace files as the source of truth. Enable SQLite only if you need `dataelf job ...` lookup commands:
+
+```bash
+export DATAELF_ENABLE_SQLITE=1
+```
+
 To force fixture mode for local tests:
 
 ```bash
@@ -58,11 +64,12 @@ If `dcode` is not installed or not on `PATH`, DataElf fails clearly and writes d
 ```bash
 dataelf init
 dataelf discover "围绕 Agentic LLMs，基于 AI Index 和联网搜索，发现最近值得关注的 3 个 insight"
-dataelf job workspace <job_id>
-dataelf job insights <job_id>
-dataelf job brief <job_id>
-dataelf job review <job_id>
-dataelf job logs <job_id>
+# With DATAELF_ENABLE_SQLITE=1 only:
+# dataelf job workspace <job_id>
+# dataelf job insights <job_id>
+# dataelf job brief <job_id>
+# dataelf job review <job_id>
+# dataelf job logs <job_id>
 ```
 
 ## Discovery Workspace

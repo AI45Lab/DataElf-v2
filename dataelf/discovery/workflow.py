@@ -21,10 +21,33 @@ from dataelf.stores.sqlite_store import SQLiteStore
 logger = logging.getLogger("dataelf.discovery")
 
 
+class StoreLike:
+    def save_discovery_job(self, job: DiscoveryJob) -> None:
+        ...
+
+    def add_trace_event(self, job_id: str, event_type: str, payload: dict[str, Any]) -> str:
+        ...
+
+    def save_quality_review(self, review: Any) -> None:
+        ...
+
+
+class NullStore:
+    def save_discovery_job(self, job: DiscoveryJob) -> None:
+        return None
+
+    def add_trace_event(self, job_id: str, event_type: str, payload: dict[str, Any]) -> str:
+        logger.debug("trace_event skipped because sqlite is disabled: %s %s %s", job_id, event_type, payload)
+        return ""
+
+    def save_quality_review(self, review: Any) -> None:
+        return None
+
+
 class DiscoveryWorkflowState(TypedDict, total=False):
     user_query: str
     config: DataElfConfig
-    store: SQLiteStore
+    store: StoreLike
     domain_registry: DomainRegistry
     domain_pack: dict[str, Any]
     client: AIIndexClient
@@ -39,7 +62,7 @@ def run_discovery(user_query: str, config: DataElfConfig) -> DiscoveryJob:
     return result["job"]
 
 
-def initialize_job(user_query: str, config: DataElfConfig, store: SQLiteStore) -> DiscoveryJob:
+def initialize_job(user_query: str, config: DataElfConfig, store: StoreLike) -> DiscoveryJob:
     job_id = new_id("job")
     workspace_path = config.workspaces_dir / job_id
     job = DiscoveryJob(
@@ -56,7 +79,7 @@ def initialize_job(user_query: str, config: DataElfConfig, store: SQLiteStore) -
     return job
 
 
-def parse_discovery_intent(job: DiscoveryJob, store: SQLiteStore) -> DiscoveryJob:
+def parse_discovery_intent(job: DiscoveryJob, store: StoreLike) -> DiscoveryJob:
     query = job.seed_query or ""
     topic = _extract_topic(query)
     scope: dict[str, Any] = {
@@ -89,8 +112,11 @@ def build_discovery_workflow():
 
     def prepare(state: dict[str, Any]) -> dict[str, Any]:
         config: DataElfConfig = state["config"]
-        store = SQLiteStore(config.sqlite_path)
-        store.init_schema()
+        if config.enable_sqlite:
+            store: StoreLike = SQLiteStore(config.sqlite_path)
+            store.init_schema()
+        else:
+            store = NullStore()
         return {"store": store, "domain_registry": DomainRegistry()}
 
     def init_job_node(state: dict[str, Any]) -> dict[str, Any]:

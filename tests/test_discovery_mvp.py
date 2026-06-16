@@ -254,9 +254,27 @@ def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path, mon
     assert (workspace / "prompts" / "discovery_prompt.md").exists()
     assert (workspace / "logs" / "dcode_stdout.log").exists()
     assert (workspace / ".deepagents" / "agents" / "breadth-scout" / "AGENTS.md").exists()
+    assert (workspace / "workspace_index.json").exists()
 
     review = json.loads((workspace / "reviews" / "quality_review.json").read_text(encoding="utf-8"))
     assert review["review_status"] in {"pass", "pass_with_warnings"}
+    assert not config.sqlite_path.exists()
+
+
+def test_discovery_workflow_can_use_sqlite_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    fake_dcode = _write_fake_dcode(tmp_path)
+    monkeypatch.setenv("DATAELF_DCODE_BINARY", str(fake_dcode))
+    config = DataElfConfig(
+        workspace_dir=tmp_path / ".dataelf",
+        sqlite_path=tmp_path / ".dataelf" / "dataelf.sqlite",
+        raw_dir=tmp_path / ".dataelf" / "raw",
+        workspaces_dir=tmp_path / ".dataelf" / "workspaces",
+        fixtures_dir=Path("fixtures/ai_index"),
+        ai_index_mode="fixture",
+        enable_sqlite=True,
+    )
+    job = run_discovery("围绕 Agentic LLMs，发现 1 个 insight", config)
+
     store = SQLiteStore(config.sqlite_path)
     store.init_schema()
     assert store.get_discovery_job(job.job_id) is not None

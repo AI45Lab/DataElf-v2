@@ -25,6 +25,8 @@ def _config() -> DataElfConfig:
 
 
 def _store(config: DataElfConfig) -> SQLiteStore:
+    if not config.enable_sqlite:
+        raise RuntimeError("SQLite job registry is disabled. Set DATAELF_ENABLE_SQLITE=1 to enable job lookup commands.")
     store = SQLiteStore(config.sqlite_path)
     store.init_schema()
     return store
@@ -39,10 +41,13 @@ def init() -> None:
     """Initialize the local DataElf workspace."""
     config = _config()
     config.ensure_dirs()
-    store = _store(config)
-    store.close()
     console.print(f"Initialized DataElf workspace: [bold]{config.workspace_dir.resolve()}[/bold]")
-    console.print(f"SQLite: {config.sqlite_path.resolve()}")
+    if config.enable_sqlite:
+        store = _store(config)
+        store.close()
+        console.print(f"SQLite: {config.sqlite_path.resolve()}")
+    else:
+        console.print("SQLite: disabled (set DATAELF_ENABLE_SQLITE=1 to enable job registry commands)")
     console.print(f"Raw cache: {config.raw_dir.resolve()}")
     console.print(f"Discovery workspaces: {config.workspaces_dir.resolve()}")
 
@@ -64,8 +69,12 @@ def discover(query: str) -> None:
     console.print(f"Workspace: {workspace}")
     console.print(f"Insight candidates: {workspace / 'insights' / 'insight_candidates.json'}")
     console.print(f"Final brief: {workspace / 'insights' / 'final_brief.md'}")
-    console.print(f"Review: dataelf job review {job.job_id}")
-    console.print(f"Logs: dataelf job logs {job.job_id}")
+    console.print(f"Review file: {workspace / 'reviews' / 'quality_review.json'}")
+    console.print(f"dcode stdout: {workspace / 'logs' / 'dcode_stdout.log'}")
+    console.print(f"dcode stderr: {workspace / 'logs' / 'dcode_stderr.log'}")
+    if config.enable_sqlite:
+        console.print(f"Registry review: dataelf job review {job.job_id}")
+        console.print(f"Registry logs: dataelf job logs {job.job_id}")
     if job.status == "failed":
         if job.error:
             console.print(f"[red]Error:[/red] {job.error}")
@@ -75,7 +84,11 @@ def discover(query: str) -> None:
 @job_app.command("workspace")
 def job_workspace(job_id: str) -> None:
     """Show a discovery job workspace path."""
-    store = _store(_config())
+    config = _config()
+    if not config.enable_sqlite:
+        _print_sqlite_disabled()
+        return
+    store = _store(config)
     job = store.get_discovery_job(job_id)
     if not job:
         console.print(f"[yellow]No discovery job found:[/yellow] {job_id}")
@@ -105,7 +118,11 @@ def job_review(job_id: str) -> None:
 @job_app.command("logs")
 def job_logs(job_id: str) -> None:
     """Show workflow logs for a discovery job."""
-    store = _store(_config())
+    config = _config()
+    if not config.enable_sqlite:
+        _print_sqlite_disabled()
+        return
+    store = _store(config)
     events = store.list_trace_events(job_id)
     table = Table(title=f"Job Logs: {job_id}")
     table.add_column("time")
@@ -130,7 +147,11 @@ def tools_list() -> None:
 
 
 def _print_job_file(job_id: str, relative_path: str) -> None:
-    store = _store(_config())
+    config = _config()
+    if not config.enable_sqlite:
+        _print_sqlite_disabled()
+        return
+    store = _store(config)
     job = store.get_discovery_job(job_id)
     if not job:
         console.print(f"[yellow]No discovery job found:[/yellow] {job_id}")
@@ -142,3 +163,10 @@ def _print_job_file(job_id: str, relative_path: str) -> None:
     else:
         console.print(path.read_text(encoding="utf-8"))
     store.close()
+
+
+def _print_sqlite_disabled() -> None:
+    console.print(
+        "[yellow]SQLite job registry is disabled by default.[/yellow]\n"
+        "Use the workspace path printed by `dataelf discover`, or set DATAELF_ENABLE_SQLITE=1 before running jobs."
+    )
