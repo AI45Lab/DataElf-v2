@@ -26,6 +26,7 @@ def _write_fake_dcode(tmp_path: Path) -> Path:
         """#!/usr/bin/env bash
 set -euo pipefail
 mkdir -p insights scripts deep_dives tables raw/web logs
+echo "App: fake | Agent: agent | Model: fake-model | Thread: fake"
 cat > insights/candidate_signals.json <<'JSON'
 {
   "candidate_signals": [
@@ -80,6 +81,88 @@ finding_id,source_id,finding_type,summary,supports,challenges,confidence,url,sou
 finding_001,web_001,web_search,External fake finding,ins_001,,0.5,https://example.com,
 CSV
 echo "fake dcode completed"
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _write_failed_fake_dcode(tmp_path: Path) -> Path:
+    path = tmp_path / "failed_fake_dcode"
+    path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+echo "App: fake | Agent: agent | Model: failing-model | Thread: fake"
+echo "fake dcode hard failure" >&2
+exit 1
+""",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _write_retry_fake_dcode(tmp_path: Path) -> Path:
+    path = tmp_path / "retry_fake_dcode"
+    path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p insights scripts deep_dives tables logs
+if [ ! -f .retry_seen ]; then
+  touch .retry_seen
+  cat > insights/candidate_signals.json <<'JSON'
+{
+  "candidate_signals": [
+    {
+      "signal_id": "sig_001",
+      "signal_type": "paper_cluster",
+      "summary": "A partial signal survived the first DeepAgentsCode run.",
+      "why_might_matter": "The retry should synthesize this signal without restarting collection.",
+      "supporting_tables": ["papers.csv"],
+      "related_entities": ["Paper"],
+      "suggested_deep_dive": ["Use existing scripts"],
+      "initial_score": {"novelty": 0.7, "magnitude": 0.6, "strategic_relevance": 0.8},
+      "status": "needs_deep_dive"
+    }
+  ]
+}
+JSON
+  cat > insights/insight_candidates.json <<'JSON'
+{"insight_candidates":[]}
+JSON
+  echo "first run failed after partial artifacts" >&2
+  exit 1
+fi
+cat > insights/insight_candidates.json <<'JSON'
+{
+  "insight_candidates": [
+    {
+      "insight_id": "ins_retry_001",
+      "title": "Retry synthesis converted a partial signal into an insight",
+      "thesis": "A synthesis-only retry can finish file artifacts after a remote dcode failure.",
+      "why_now": "The first run already produced candidate signals and analysis files.",
+      "supporting_signals": ["sig_001"],
+      "analysis_artifacts": ["scripts/retry_analysis.py", "deep_dives/sig_001.md"],
+      "related_entities": ["Paper:Partial signal"],
+      "external_support": [],
+      "counterarguments": ["This is a fake dcode retry test."],
+      "confidence": 0.5,
+      "next_questions": ["Run with real dcode."]
+    }
+  ]
+}
+JSON
+cat > insights/final_brief.md <<'MD'
+# Retry brief
+MD
+cat > scripts/retry_analysis.py <<'PY'
+print("retry")
+PY
+cat > deep_dives/sig_001.md <<'MD'
+# Retry deep dive
+MD
+echo "retry completed"
 """,
         encoding="utf-8",
     )
@@ -282,6 +365,26 @@ def test_discovery_workflow_can_use_sqlite_when_enabled(tmp_path: Path, monkeypa
     store.close()
 
 
+def test_discovery_workflow_skips_quality_review_when_explore_fails(tmp_path: Path, monkeypatch) -> None:
+    fake_dcode = _write_failed_fake_dcode(tmp_path)
+    monkeypatch.setenv("DATAELF_DCODE_BINARY", str(fake_dcode))
+    config = DataElfConfig(
+        workspace_dir=tmp_path / ".dataelf",
+        sqlite_path=tmp_path / ".dataelf" / "dataelf.sqlite",
+        raw_dir=tmp_path / ".dataelf" / "raw",
+        workspaces_dir=tmp_path / ".dataelf" / "workspaces",
+        fixtures_dir=Path("fixtures/ai_index"),
+        ai_index_mode="fixture",
+    )
+
+    job = run_discovery("围绕 Agentic LLMs，发现 1 个 insight", config)
+
+    assert job.status == "failed"
+    assert job.error == "dcode_exit_1"
+    review = json.loads((Path(job.workspace_path) / "reviews" / "quality_review.json").read_text(encoding="utf-8"))
+    assert review["review_status"] == "skipped"
+
+
 def test_quality_review_detects_missing_candidates(tmp_path: Path) -> None:
     workspace = prepare_workspace(tmp_path / "workspace")
     (workspace / "insights" / "insight_candidates.json").write_text('{"insight_candidates":[]}\n', encoding="utf-8")
@@ -300,6 +403,22 @@ def test_deepagents_code_cli_missing_binary_is_clear(tmp_path: Path) -> None:
     assert result.status == "failed"
     assert "DeepAgentsCode CLI not found" in (result.error or "")
     assert "DeepAgentsCode CLI not found" in (workspace / "logs" / "dcode_stderr.log").read_text(encoding="utf-8")
+
+
+def test_deepagents_code_cli_retries_synthesis_after_partial_failure(tmp_path: Path) -> None:
+    fake_dcode = _write_retry_fake_dcode(tmp_path)
+    workspace = prepare_workspace(tmp_path / "workspace")
+    job = DiscoveryJob(job_id="job_retry_dcode", workspace_path=str(workspace), seed_query="test")
+    explorer = DeepAgentsCodeCliInsightsExplorer(dcode_binary=str(fake_dcode))
+
+    result = explorer.run(job, DiscoveryContext(workspace_path=str(workspace), domain="ai_index"))
+
+    assert result.status in {"completed", "incomplete"}
+    assert result.error is None
+    assert "Initial DeepAgentsCode run exited with code 1" in result.warnings[0]
+    assert (workspace / "logs" / "dcode_synthesis_retry_stdout.log").exists()
+    data = json.loads((workspace / "insights" / "insight_candidates.json").read_text(encoding="utf-8"))
+    assert data["insight_candidates"][0]["insight_id"] == "ins_retry_001"
 
 
 def test_cli_discover_smoke(tmp_path: Path, monkeypatch) -> None:
@@ -321,6 +440,7 @@ def test_cli_discover_smoke(tmp_path: Path, monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "Discovery job completed" in result.output
+    assert "Actual dcode model: fake-model" in result.output
     assert (tmp_path / ".dataelf" / "workspaces").exists()
 
 

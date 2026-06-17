@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import logging
 from pathlib import Path
 
@@ -67,6 +68,8 @@ def discover(query: str) -> None:
     console.print(f"[{status_style}]Discovery job {job.status}:[/{status_style}] {job.job_id}")
     workspace = Path(job.workspace_path).resolve()
     console.print(f"Workspace: {workspace}")
+    console.print(f"Requested model: {config.model or '<dcode default>'}")
+    console.print(f"Actual dcode model: {_read_dcode_model(workspace) or '<unknown>'}")
     console.print(f"Insight candidates: {workspace / 'insights' / 'insight_candidates.json'}")
     console.print(f"Final brief: {workspace / 'insights' / 'final_brief.md'}")
     console.print(f"Review file: {workspace / 'reviews' / 'quality_review.json'}")
@@ -170,3 +173,14 @@ def _print_sqlite_disabled() -> None:
         "[yellow]SQLite job registry is disabled by default.[/yellow]\n"
         "Use the workspace path printed by `dataelf discover`, or set DATAELF_ENABLE_SQLITE=1 before running jobs."
     )
+
+
+def _read_dcode_model(workspace: Path) -> str | None:
+    for relative in ["logs/dcode_stdout.log", "logs/dcode_synthesis_retry_stdout.log"]:
+        path = workspace / relative
+        if not path.exists():
+            continue
+        match = re.search(r"\bModel:\s*([^|\n]+)", path.read_text(encoding="utf-8", errors="replace"))
+        if match:
+            return match.group(1).strip()
+    return None

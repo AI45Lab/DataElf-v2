@@ -57,14 +57,17 @@ class DiscoveryWorkflowState(TypedDict, total=False):
 
 def run_discovery(user_query: str, config: DataElfConfig) -> DiscoveryJob:
     config.ensure_dirs()
+    logger.info("Starting discovery workflow.")
     graph = build_discovery_workflow()
     result = graph.invoke({"user_query": user_query, "config": config})
+    logger.info("Discovery workflow finished with status=%s.", result["job"].status)
     return result["job"]
 
 
 def initialize_job(user_query: str, config: DataElfConfig, store: StoreLike) -> DiscoveryJob:
     job_id = new_id("job")
     workspace_path = config.workspaces_dir / job_id
+    logger.info("Initializing discovery job %s.", job_id)
     job = DiscoveryJob(
         job_id=job_id,
         trigger_type="user",
@@ -81,6 +84,7 @@ def initialize_job(user_query: str, config: DataElfConfig, store: StoreLike) -> 
 
 def parse_discovery_intent(job: DiscoveryJob, store: StoreLike) -> DiscoveryJob:
     query = job.seed_query or ""
+    logger.info("Parsing discovery intent for job %s.", job.job_id)
     topic = _extract_topic(query)
     scope: dict[str, Any] = {
         "domain": "ai_index",
@@ -128,12 +132,14 @@ def build_discovery_workflow():
     def load_domain_pack_node(state: dict[str, Any]) -> dict[str, Any]:
         job: DiscoveryJob = state["job"]
         domain = job.scope.get("domain", "ai_index")
+        logger.info("Loading domain pack: %s.", domain)
         pack = state["domain_registry"].load_domain_pack(domain)
         state["store"].add_trace_event(job.job_id, "domain_pack_loaded", {"domain": domain, "tools": pack.get("tools", [])})
         return {"domain_pack": pack}
 
     def prepare_workspace_node(state: dict[str, Any]) -> dict[str, Any]:
         job: DiscoveryJob = state["job"]
+        logger.info("Preparing workspace: %s.", job.workspace_path)
         workspace = prepare_workspace(Path(job.workspace_path), domain=job.scope.get("domain", "ai_index"))
         state["store"].add_trace_event(job.job_id, "workspace_prepared", {"workspace_path": str(workspace)})
         return {}
@@ -141,6 +147,7 @@ def build_discovery_workflow():
     def insights_explore_node(state: dict[str, Any]) -> dict[str, Any]:
         config: DataElfConfig = state["config"]
         job: DiscoveryJob = state["job"]
+        logger.info("Starting insights_explore for job %s.", job.job_id)
         connector = AIIndexConnector(
             mode=config.ai_index_mode,
             base_url=config.ai_index_base_url,
@@ -164,10 +171,12 @@ def build_discovery_workflow():
         )
         state["store"].add_trace_event(job.job_id, "insights_explore_start", {"mode": config.ai_index_mode})
         result = explorer.run(job, context)
+        logger.info("insights_explore finished with status=%s for job %s.", result.status, job.job_id)
         job.insight_candidate_ids = load_insight_candidate_ids(Path(job.workspace_path))
         job.updated_at = now_utc()
-        if result.status in {"failed", "incomplete"} and result.error:
+        if result.error:
             job.error = result.error or "insights_explore_failed"
+            job.status = "failed"
         state["store"].save_discovery_job(job)
         state["store"].add_trace_event(
             job.job_id,
@@ -176,8 +185,16 @@ def build_discovery_workflow():
         )
         return {"job": job, "client": client}
 
+    def route_after_insights_explore(state: dict[str, Any]) -> str:
+        job: DiscoveryJob = state["job"]
+        if job.status == "failed" or job.error:
+            logger.info("Skipping quality review because insights_explore failed for job %s.", job.job_id)
+            return "finalize"
+        return "quality_review"
+
     def quality_review_node(state: dict[str, Any]) -> dict[str, Any]:
         job: DiscoveryJob = state["job"]
+        logger.info("Running quality review for job %s.", job.job_id)
         review = review_workspace(job.job_id, Path(job.workspace_path))
         state["store"].save_quality_review(review)
         (Path(job.workspace_path) / "reviews" / "quality_review.json").write_text(
@@ -194,10 +211,14 @@ def build_discovery_workflow():
     def finalize_node(state: dict[str, Any]) -> dict[str, Any]:
         job: DiscoveryJob = state["job"]
         review = state.get("quality_review", {})
-        job.status = "completed" if review.get("review_status") != "failed" else "failed"
+        logger.info("Finalizing job %s.", job.job_id)
+        if job.status != "failed":
+            job.status = "completed" if review.get("review_status") != "failed" else "failed"
         job.updated_at = now_utc()
         if job.status == "failed" and not job.error:
             job.error = "quality_review_failed"
+        if job.status == "failed" and not review:
+            review = _write_skipped_quality_review(job, "Skipped because insights_explore failed.")
         state["store"].save_discovery_job(job)
         _write_workspace_index(job, review)
         state["store"].add_trace_event(job.job_id, "job_finalized", {"status": job.status})
@@ -218,7 +239,11 @@ def build_discovery_workflow():
     workflow.add_edge("intent_parse", "load_domain_pack")
     workflow.add_edge("load_domain_pack", "prepare_workspace")
     workflow.add_edge("prepare_workspace", "insights_explore")
-    workflow.add_edge("insights_explore", "quality_review")
+    workflow.add_conditional_edges(
+        "insights_explore",
+        route_after_insights_explore,
+        {"quality_review": "quality_review", "finalize": "finalize"},
+    )
     workflow.add_edge("quality_review", "finalize")
     workflow.add_edge("finalize", END)
     return workflow.compile()
@@ -261,3 +286,19 @@ def _write_workspace_index(job: DiscoveryJob, review: dict[str, Any]) -> None:
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_skipped_quality_review(job: DiscoveryJob, reason: str) -> dict[str, Any]:
+    payload = {
+        "review_id": None,
+        "job_id": job.job_id,
+        "review_status": "skipped",
+        "warnings": [reason],
+        "recommended_revision": False,
+        "payload": {"reason": reason},
+        "created_at": now_utc().isoformat(),
+    }
+    path = Path(job.workspace_path) / "reviews" / "quality_review.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
