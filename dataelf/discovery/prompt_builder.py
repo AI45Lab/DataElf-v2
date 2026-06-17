@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from dataelf.discovery.base import DiscoveryContext
+from dataelf.discovery.common_prompt_builder import build_common_dynamic_discovery_prompt
 from dataelf.schemas import DiscoveryJob
 
 
@@ -16,60 +16,33 @@ def write_discovery_prompt(job: DiscoveryJob, context: DiscoveryContext) -> Path
 
 
 def build_discovery_prompt(job: DiscoveryJob, context: DiscoveryContext) -> str:
-    workspace_path = Path(context.workspace_path).resolve()
-    scope_json = json.dumps(job.scope, ensure_ascii=False, indent=2)
-    constraints_json = json.dumps(job.constraints, ensure_ascii=False, indent=2)
-    seed_query = job.seed_query or ""
-    model_line = f"\nPreferred model: `{context.model}`\n" if context.model else ""
+    return build_common_dynamic_discovery_prompt(
+        job,
+        context,
+        title="DataElf DeepAgentsCode Insight Explorer",
+        backend_name="deepagentscode",
+        tool_appendix=_build_dcode_tool_appendix(),
+    )
 
-    return f"""# DataElf Insight Discovery Task
 
-You are DataElf DiscoveryAgent, an insight discovery agent for technology intelligence.
+def _build_dcode_tool_appendix() -> str:
+    return """### DeepAgentsCode CLI Runtime
 
-Your goal is not to summarize data. Your goal is to discover non-obvious, high-value, strategically meaningful insights from AI Index data, local structured tables, Python analysis, and external web signals.
-{model_line}
-## Workspace
+You are running inside the DataElf job workspace through the DeepAgentsCode CLI runner.
 
-You are running inside this workspace:
+Use DeepAgentsCode's native tools to inspect files, write files, execute Python/shell commands, and search/fetch the web.
 
-`{workspace_path}`
+### AI Index Access
 
-Use the workspace as the single source of working files. Do not modify the DataElf source repository.
-
-Important directories:
-
-- `raw/ai_index/`: raw AI Index API responses.
-- `raw/web/`: raw external web search or fetched page notes.
-- `tables/`: flat CSV files for analysis. Prefer these over raw JSON for quantitative analysis.
-- `scripts/`: Python scripts you write and run.
-- `notes/`: research notes, hypotheses, and search summaries.
-- `deep_dives/`: detailed deep-dive reports for selected candidate signals.
-- `insights/`: final structured outputs.
-
-## Data Sources
-
-You have access to:
-
-1. Local CSV tables under `tables/`.
-2. Raw AI Index API responses under `raw/ai_index/`.
-3. AI Index dynamic data access via Python SDK.
-4. DeepAgentsCode `web_search` / `fetch_url` tools for external web investigation.
-
-## AI Index SDK
-
-When you need more AI Index data, write Python scripts under `scripts/` and import:
+When you need AI Index data, write Python scripts under `scripts/` and import:
 
 ```python
 from dataelf.domains.ai_index.client import AIIndexClient
-```
 
-Use:
-
-```python
 client = AIIndexClient.from_env()
 ```
 
-Available methods:
+Available SDK methods:
 
 - `search_papers(...)`
 - `search_institutions(...)`
@@ -78,49 +51,25 @@ Available methods:
 - `save_raw(name, response, workspace_path=None)`
 - `save_table(table_name, rows, workspace_path=None)`
 
-Do not call the AI Index HTTP API directly. Use `AIIndexClient`.
-
 `search_*` and `fetch_institution_funding` automatically save raw responses under `raw/ai_index/` and update normalized CSV tables under `tables/`.
-
-Important execution guidance for this CLI runner:
-
-- You may fetch broad AI Index data when it is useful for insight discovery.
-- Prefer progressive acquisition: fetch a batch, write raw/tables/notes, summarize what changed, then decide the next batch.
-- Do not print raw API responses, full dataframes, or long CSV contents to stdout.
-- Write large details to `notes/`, `tables/`, or `raw/`; print only compact summaries from scripts.
-- If a script or model step fails after a large batch, retry with smaller batches and summarize intermediate files instead of abandoning the task.
 
 Use `save_raw(...)` only for custom responses not already saved by `search_*`.
 Use `save_table(...)` only for derived analysis tables you create.
 
-## DeepAgentsCode Subagents
+### Python And Files
 
-Project subagent shells are available under `.deepagents/agents/`:
+- Write Python scripts under `scripts/`.
+- Run scripts from the workspace.
+- Return compact summaries from scripts.
+- Write large details to `notes/`, `tables/`, `deep_dives/`, or `raw/`.
+- Do not print raw API responses, full dataframes, or long CSV contents.
+- If a script or model step fails after a large batch, retry with smaller batches and summarize intermediate files instead of abandoning the task.
 
-- `breadth-scout`: broad AI Index and local table scan; generate candidate signal coverage.
-- `code-analyst`: Python analysis, joins, aggregations, anomaly detection, and derived tables.
-- `web-investigator`: external web_search / fetch_url investigation.
-- `skeptic`: challenge evidence, low-base effects, obviousness, and alternative explanations.
-- `insight-synthesizer`: produce final insight_candidates.json and final_brief.md.
-
-These subagents are M1 project role shells for future prompt tuning. Do not make `task` delegation a required first step in this CLI runner. First inspect the workspace and proceed in the main agent context. Use the DeepAgentsCode `task` tool only if it is clearly available and stable in the current run. If `task` delegation fails or appears unstable, continue in the main agent context and write concise role-specific notes under `notes/` instead.
-
-## External Web Search
+### External Web
 
 Use DeepAgentsCode `web_search` and `fetch_url` when useful.
 
-External search should be used to explain or challenge AI Index signals, not to replace data analysis.
-
-Look for:
-
-- benchmark leaderboards
-- GitHub repositories
-- project pages
-- arXiv or paper pages
-- institution announcements
-- technical blogs
-- funding or news events
-- datasets and benchmark releases
+External search should explain, validate, or challenge AI Index signals. Look for benchmark leaderboards, GitHub repositories, project pages, arXiv or paper pages, institution announcements, technical blogs, funding/news events, datasets, and benchmark pages.
 
 Write external observations to:
 
@@ -128,198 +77,26 @@ Write external observations to:
 - `tables/external_findings.csv`
 - `raw/web/`
 
-If web search is unavailable, say so explicitly in the final brief. Do not fabricate external facts.
+If web search is unavailable, say so explicitly in the final brief.
 
-## Required Workflow
+### Artifact Writing
 
-You must work in four phases.
+Write final artifacts directly to:
 
-### Phase 1: Breadth Scan
+- `insights/candidate_signals.json`
+- `insights/insight_candidates.json`
+- `insights/final_brief.md`
 
-Inspect available tables and raw files. If needed, dynamically fetch more AI Index data using `AIIndexClient`.
+Make sure the JSON files are valid JSON and match the common schemas.
 
-Generate at least 15 candidate signals and write them to:
+### DeepAgentsCode Subagents
 
-`insights/candidate_signals.json`
+Project subagent shells are available under `.deepagents/agents/`:
 
-Candidate signals are not final insights. They are possible directions for deeper investigation.
+- `breadth-scout`: broad AI Index and local table scan; generate candidate signal coverage.
+- `code-analyst`: Python analysis, joins, aggregations, anomaly detection, and derived tables.
+- `web-investigator`: external web_search / fetch_url investigation.
+- `skeptic`: challenge evidence, low-base effects, obviousness, and alternative explanations.
+- `insight-synthesizer`: produce final `insight_candidates.json` and `final_brief.md`.
 
-Candidate signals should cover multiple categories:
-
-- topic growth
-- institution anomaly
-- paper cluster
-- scholar activity
-- benchmark or dataset emergence
-- cross-domain connection
-- external signal
-- funding or industry signal
-
-Do not produce final insights in this phase.
-
-### Phase 2: Candidate Selection
-
-Read `insights/candidate_signals.json`.
-
-Score candidate signals using:
-
-- novelty
-- magnitude
-- relation complexity
-- strategic relevance
-- external support potential
-- actionability
-- low-base risk
-- obviousness risk
-
-Select the top 3 to 5 signals for deep dive.
-
-### Phase 3: Deep Dive
-
-For each selected signal:
-
-1. Write at least one Python script under `scripts/`.
-2. Run the script.
-3. Use pandas or another Python library to analyze CSV tables.
-4. Use groupby / join / anomaly detection / co-occurrence / ranking / simple network analysis when useful.
-5. Save outputs under `tables/` or `deep_dives/`.
-6. Use web_search / fetch_url if external explanation is needed.
-7. Check counterarguments and uncertainty.
-
-Every deep dive must answer:
-
-- What is the signal?
-- Why might it matter?
-- What data supports it?
-- What Python analysis artifact supports it?
-- What external signal supports or challenges it?
-- What alternative explanations exist?
-- What uncertainty remains?
-
-Write deep-dive reports to:
-
-`deep_dives/`
-
-### Phase 4: Synthesis
-
-Produce final outputs:
-
-1. `insights/insight_candidates.json`
-2. `insights/final_brief.md`
-
-Each final insight must include:
-
-- title
-- thesis
-- why_now
-- supporting_signals
-- analysis_artifacts
-- related_entities
-- external_support
-- counterarguments
-- confidence
-- next_questions
-
-Do not make all final insights trend or shift narratives. A trend is only one possible insight form.
-
-Final insights should cover at least two of these insight forms:
-
-- mechanism insight: explain why a pattern is happening or what system mechanism creates it
-- structural relationship insight: connect entity types, such as Paper + Institution + Benchmark, in a non-obvious way
-- anomaly insight: identify an entity or cluster that behaves differently from the baseline
-- opportunity or risk insight: identify a strategic opening, bottleneck, or failure mode
-- contradiction or tension insight: show where AI Index data and external signals disagree or create uncertainty
-- ecosystem gap insight: identify a missing benchmark, missing infrastructure, missing institution, or under-served niche
-- trend or timing insight: explain what is emerging, accelerating, fragmenting, or shifting
-
-## Hard Rules
-
-- Do not output simple top-N rankings as insights.
-- Do not output generic summaries.
-- Do not merely restate API fields.
-- Do not make every final insight a "正在转向 / is shifting / is becoming / is emerging" trend claim.
-- At most one final insight should be primarily a trend/trajectory claim unless the data strongly justifies more.
-- Prefer titles that state a mechanism, anomaly, tension, gap, or strategic implication, not only a direction of change.
-- Prefer `tables/*.csv` for quantitative analysis.
-- Use `raw/ai_index/` only to inspect original details missing from tables.
-- At least two final insights should be supported by Python analysis artifacts.
-- At least one final insight should attempt to connect AI Index data with an external web signal.
-- Each final insight should connect at least two entity types, such as Paper + Institution, Institution + Scholar, Paper + Benchmark, or AI Index data + WebSource.
-- If the available data is insufficient, produce fewer but stronger insights rather than filling the quota with weak claims.
-- Do not fabricate external facts. If web search is unavailable, state that limitation.
-
-## Output Schemas
-
-### candidate_signals.json
-
-Write:
-
-```json
-{{
-  "candidate_signals": [
-    {{
-      "signal_id": "sig_001",
-      "signal_type": "institution_anomaly",
-      "summary": "...",
-      "why_might_matter": "...",
-      "supporting_tables": ["papers.csv", "institutions.csv"],
-      "related_entities": ["Institution", "Paper", "Topic"],
-      "suggested_deep_dive": ["..."],
-      "initial_score": {{
-        "novelty": 0.0,
-        "magnitude": 0.0,
-        "strategic_relevance": 0.0
-      }},
-      "status": "needs_deep_dive"
-    }}
-  ]
-}}
-```
-
-### insight_candidates.json
-
-Write:
-
-```json
-{{
-  "insight_candidates": [
-    {{
-      "insight_id": "ins_001",
-      "title": "...",
-      "thesis": "...",
-      "why_now": "...",
-      "supporting_signals": ["sig_001"],
-      "analysis_artifacts": ["scripts/analysis.py", "tables/result.csv", "deep_dives/sig_001.md"],
-      "related_entities": ["Topic:Agentic LLMs", "Institution:...", "Paper:..."],
-      "external_support": [
-        {{
-          "source_id": "web_001",
-          "summary": "..."
-        }}
-      ],
-      "counterarguments": ["..."],
-      "confidence": 0.0,
-      "next_questions": ["..."]
-    }}
-  ]
-}}
-```
-
-Now start the discovery task.
-
-User task:
-
-`{seed_query}`
-
-Scope:
-
-```json
-{scope_json}
-```
-
-Constraints:
-
-```json
-{constraints_json}
-```
-"""
+These subagents are backend capabilities, not the common discovery method. Do not make `task` delegation a required first step. First inspect the workspace and proceed in the main agent context. Use the DeepAgentsCode `task` tool only if it is clearly available and stable in the current run. If `task` delegation fails or appears unstable, continue in the main agent context and write concise role-specific notes under `notes/` instead."""
