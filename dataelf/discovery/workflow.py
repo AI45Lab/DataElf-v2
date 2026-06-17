@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 from dataelf.config import DataElfConfig
 from dataelf.discovery.base import DiscoveryContext
 from dataelf.discovery.domain_registry import DomainRegistry
-from dataelf.discovery.deepagents_code_cli_explorer import DeepAgentsCodeCliInsightsExplorer
+from dataelf.discovery.insights_explorer import create_insights_explorer
 from dataelf.discovery.quality_review import review_workspace
 from dataelf.discovery.result_parser import load_insight_candidate_ids
 from dataelf.discovery.workspace import prepare_workspace
@@ -156,7 +156,7 @@ def build_discovery_workflow():
             workspace_path=Path(job.workspace_path),
         )
         client = AIIndexClient(connector=connector, workspace_path=Path(job.workspace_path))
-        explorer = DeepAgentsCodeCliInsightsExplorer()
+        explorer = create_insights_explorer(config)
         context = DiscoveryContext(
             workspace_path=job.workspace_path,
             domain=job.scope.get("domain", "ai_index"),
@@ -170,11 +170,12 @@ def build_discovery_workflow():
             config=config.model_dump(mode="json"),
         )
         state["store"].add_trace_event(job.job_id, "insights_explore_start", {"mode": config.ai_index_mode})
+        logger.info("Using insights explorer backend: %s.", config.insights_explorer)
         result = explorer.run(job, context)
         logger.info("insights_explore finished with status=%s for job %s.", result.status, job.job_id)
         job.insight_candidate_ids = load_insight_candidate_ids(Path(job.workspace_path))
         job.updated_at = now_utc()
-        if result.error:
+        if result.status != "completed":
             job.error = result.error or "insights_explore_failed"
             job.status = "failed"
         state["store"].save_discovery_job(job)

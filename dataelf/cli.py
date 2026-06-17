@@ -54,10 +54,12 @@ def init() -> None:
 
 
 @app.command()
-def discover(query: str) -> None:
+def discover(query: str, explorer: str | None = typer.Option(None, "--explorer", help="Insights explorer backend: deepagentscode or cubepi.")) -> None:
     """Run a user-triggered insight discovery job."""
     _setup_logging()
     config = _config()
+    if explorer:
+        config.insights_explorer = explorer
     try:
         job = run_discovery(query, config)
     except Exception as exc:
@@ -68,13 +70,22 @@ def discover(query: str) -> None:
     console.print(f"[{status_style}]Discovery job {job.status}:[/{status_style}] {job.job_id}")
     workspace = Path(job.workspace_path).resolve()
     console.print(f"Workspace: {workspace}")
-    console.print(f"Requested model: {config.model or '<dcode default>'}")
-    console.print(f"Actual dcode model: {_read_dcode_model(workspace) or '<unknown>'}")
+    console.print(f"Insights explorer: {config.insights_explorer}")
+    if _is_cubepi(config.insights_explorer):
+        console.print(f"Requested model: {config.cubepi_model or config.model or '<cubepi provider default>'}")
+    else:
+        console.print(f"Requested model: {config.model or '<dcode default>'}")
+        console.print(f"Actual dcode model: {_read_dcode_model(workspace) or '<unknown>'}")
     console.print(f"Insight candidates: {workspace / 'insights' / 'insight_candidates.json'}")
     console.print(f"Final brief: {workspace / 'insights' / 'final_brief.md'}")
     console.print(f"Review file: {workspace / 'reviews' / 'quality_review.json'}")
-    console.print(f"dcode stdout: {workspace / 'logs' / 'dcode_stdout.log'}")
-    console.print(f"dcode stderr: {workspace / 'logs' / 'dcode_stderr.log'}")
+    if _is_cubepi(config.insights_explorer):
+        console.print(f"CubePi stdout: {workspace / 'logs' / 'cubepi_stdout.log'}")
+        console.print(f"CubePi events: {workspace / 'logs' / 'cubepi_events.jsonl'}")
+        console.print(f"CubePi errors: {workspace / 'logs' / 'cubepi_error.log'}")
+    else:
+        console.print(f"dcode stdout: {workspace / 'logs' / 'dcode_stdout.log'}")
+        console.print(f"dcode stderr: {workspace / 'logs' / 'dcode_stderr.log'}")
     if config.enable_sqlite:
         console.print(f"Registry review: dataelf job review {job.job_id}")
         console.print(f"Registry logs: dataelf job logs {job.job_id}")
@@ -184,3 +195,7 @@ def _read_dcode_model(workspace: Path) -> str | None:
         if match:
             return match.group(1).strip()
     return None
+
+
+def _is_cubepi(explorer: str) -> bool:
+    return explorer.strip().lower() in {"cubepi", "cube_pi", "pi"}

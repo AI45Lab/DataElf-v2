@@ -103,7 +103,7 @@ Project subagent shells are available under `.deepagents/agents/`:
 - `skeptic`: challenge evidence, low-base effects, obviousness, and alternative explanations.
 - `insight-synthesizer`: produce final insight_candidates.json and final_brief.md.
 
-Use the DeepAgentsCode `task` tool to delegate when helpful. In particular, delegate the first broad/starter scan to `breadth-scout` rather than doing all acquisition in the main agent context. Subagents should write findings to workspace files and return concise summaries to the main agent.
+These subagents are M1 project role shells for future prompt tuning. Do not make `task` delegation a required first step in this CLI runner. First inspect the workspace and proceed in the main agent context. Use the DeepAgentsCode `task` tool only if it is clearly available and stable in the current run. If `task` delegation fails or appears unstable, continue in the main agent context and write concise role-specific notes under `notes/` instead.
 
 ## External Web Search
 

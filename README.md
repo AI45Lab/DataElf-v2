@@ -13,7 +13,9 @@ dataelf discover
   -> candidate_signals.json / insight_candidates.json / final_brief.md
 ```
 
-The current `insights_explore` uses a DeepAgentsCode CLI runner. This is a Discovery Lab Runner for quickly testing whether DeepAgentsCode can use dynamic AI Index data, web search, and Python analysis to produce deeper insights. It is not the final DataElf-native agent runtime integration. The stable contract is the outer `DiscoveryWorkflow`, `DiscoveryJob`, workspace layout, and `insight_candidates.json` schema.
+The default `insights_explore` uses a DeepAgentsCode CLI runner. This is a Discovery Lab Runner for quickly testing whether DeepAgentsCode can use dynamic AI Index data, web search, and Python analysis to produce deeper insights. It is not the final DataElf-native agent runtime integration. The stable contract is the outer `DiscoveryWorkflow`, `DiscoveryJob`, workspace layout, and `insight_candidates.json` schema.
+
+An experimental CubePi backend is also available as an opt-in comparison spike. It is not the default.
 
 ## Setup
 
@@ -58,6 +60,36 @@ export TAVILY_API_KEY="..."  # optional, enables dcode web_search/fetch_url
 Configure LLM provider credentials in DeepAgentsCode or in the shell environment before running DataElf. DataElf forwards the current environment to the child process, but it does not own provider auth. If `DATAELF_MODEL` is set, DataElf passes it to `dcode --model`; otherwise dcode uses its own default model config. For example, use `dcode auth set openai` or export provider variables such as `OPENAI_API_KEY` / `OPENAI_BASE_URL` according to your DeepAgentsCode provider setup.
 
 If `dcode` is not installed or not on `PATH`, DataElf fails clearly and writes details to `workspace/logs/dcode_stderr.log`.
+
+### Optional CubePi Comparison Backend
+
+DeepAgentsCode remains the default. To compare against the experimental CubePi backend:
+
+```bash
+uv pip install -e ".[cubepi]"
+export DATAELF_INSIGHTS_EXPLORER="cubepi"
+export DATAELF_CUBEPI_PROVIDER="openai"
+export DATAELF_CUBEPI_MODEL="${DATAELF_MODEL:-gpt-5.5}"
+export OPENAI_API_KEY="..."
+dataelf discover "围绕 Agentic LLMs，基于 AI Index 和联网搜索，发现最近值得关注的 3 个 insight"
+```
+
+For local tests without a provider or the `cubepi` package:
+
+```bash
+export DATAELF_INSIGHTS_EXPLORER="cubepi"
+export DATAELF_CUBEPI_DRY_RUN=1
+dataelf discover "围绕 Agentic LLMs，发现 1 个 insight"
+```
+
+You can also select the backend per command:
+
+```bash
+dataelf discover --explorer cubepi "围绕 Agentic LLMs，发现 1 个 insight"
+dataelf discover --explorer deepagentscode "围绕 Agentic LLMs，发现 1 个 insight"
+```
+
+CubePi-specific logs are written under `workspace/logs/cubepi_*`. Missing `TAVILY_API_KEY` makes CubePi `web_search` return a structured unavailable error rather than fake results.
 
 ## Run
 

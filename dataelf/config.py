@@ -9,6 +9,7 @@ DEFAULT_AI_INDEX_BASE_URL = "https://index.shlab.org.cn/api/v2"
 DEFAULT_AI_INDEX_API_KEY = "ak_0XWHy2OQpSKnaKHL"
 DEFAULT_AI_INDEX_MODE = "api"
 DEFAULT_ENABLE_SQLITE = False
+DEFAULT_INSIGHTS_EXPLORER = "deepagentscode"
 
 
 class DataElfConfig(BaseModel):
@@ -22,6 +23,10 @@ class DataElfConfig(BaseModel):
     ai_index_base_url: str = DEFAULT_AI_INDEX_BASE_URL
     ai_index_api_key: str = DEFAULT_AI_INDEX_API_KEY
     enable_sqlite: bool = DEFAULT_ENABLE_SQLITE
+    insights_explorer: str = DEFAULT_INSIGHTS_EXPLORER
+    cubepi_provider: str | None = None
+    cubepi_model: str | None = None
+    cubepi_dry_run: bool = False
 
     @classmethod
     def from_env(cls) -> "DataElfConfig":
@@ -37,6 +42,10 @@ class DataElfConfig(BaseModel):
             ai_index_base_url=os.getenv("AI_INDEX_BASE_URL", DEFAULT_AI_INDEX_BASE_URL),
             ai_index_api_key=os.getenv("AI_INDEX_API_KEY", DEFAULT_AI_INDEX_API_KEY),
             enable_sqlite=_env_bool("DATAELF_ENABLE_SQLITE", DEFAULT_ENABLE_SQLITE),
+            insights_explorer=os.getenv("DATAELF_INSIGHTS_EXPLORER", DEFAULT_INSIGHTS_EXPLORER),
+            cubepi_provider=os.getenv("DATAELF_CUBEPI_PROVIDER"),
+            cubepi_model=os.getenv("DATAELF_CUBEPI_MODEL"),
+            cubepi_dry_run=_env_bool("DATAELF_CUBEPI_DRY_RUN", False),
         )
 
     def ensure_dirs(self) -> None:

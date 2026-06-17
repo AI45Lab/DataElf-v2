@@ -8,8 +8,11 @@ from typer.testing import CliRunner
 from dataelf.cli import app
 from dataelf.config import DEFAULT_AI_INDEX_API_KEY, DEFAULT_AI_INDEX_BASE_URL, DEFAULT_AI_INDEX_MODE, DataElfConfig
 from dataelf.discovery.base import DiscoveryContext
+from dataelf.discovery.cubepi_insights_explorer import CubePiInsightsExplorer
+from dataelf.discovery.cubepi_tools import CubePiWorkspaceTools
 from dataelf.discovery.deepagents_code_cli_explorer import DEFAULT_DCODE_EXTRA_ARGS, DEFAULT_SHELL_ALLOW_LIST, DeepAgentsCodeCliInsightsExplorer
 from dataelf.discovery.domain_registry import DomainRegistry
+from dataelf.discovery.insights_explorer import create_insights_explorer
 from dataelf.discovery.quality_review import review_workspace
 from dataelf.discovery.workflow import run_discovery
 from dataelf.discovery.workspace import prepare_workspace
@@ -342,6 +345,101 @@ def test_discovery_workflow_creates_job_workspace_and_review(tmp_path: Path, mon
     review = json.loads((workspace / "reviews" / "quality_review.json").read_text(encoding="utf-8"))
     assert review["review_status"] in {"pass", "pass_with_warnings"}
     assert not config.sqlite_path.exists()
+
+
+def test_insights_explorer_factory_defaults_to_dcode() -> None:
+    config = DataElfConfig()
+
+    explorer = create_insights_explorer(config)
+
+    assert isinstance(explorer, DeepAgentsCodeCliInsightsExplorer)
+
+
+def test_insights_explorer_factory_selects_cubepi() -> None:
+    config = DataElfConfig(insights_explorer="cubepi")
+
+    explorer = create_insights_explorer(config)
+
+    assert isinstance(explorer, CubePiInsightsExplorer)
+
+
+def test_cubepi_missing_dependency_fails_clearly(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("DATAELF_CUBEPI_DRY_RUN", raising=False)
+    import dataelf.discovery.cubepi_insights_explorer as cubepi_module
+
+    def missing_import(name: str):
+        if name == "cubepi":
+            raise ImportError("missing cubepi for test")
+        return __import__(name)
+
+    monkeypatch.setattr(cubepi_module.importlib, "import_module", missing_import)
+    workspace = prepare_workspace(tmp_path / "workspace")
+    job = DiscoveryJob(job_id="job_cubepi_missing", workspace_path=str(workspace), seed_query="test")
+
+    result = CubePiInsightsExplorer().run(job, DiscoveryContext(workspace_path=str(workspace), domain="ai_index"))
+
+    assert result.status == "failed"
+    assert "CubePi is not installed" in (result.error or "")
+    assert "CubePi is not installed" in (workspace / "logs" / "cubepi_error.log").read_text(encoding="utf-8")
+
+
+def test_cubepi_workspace_path_guard_and_web_unavailable(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    workspace = prepare_workspace(tmp_path / "workspace")
+    tools = CubePiWorkspaceTools(workspace, DiscoveryContext(workspace_path=str(workspace), domain="ai_index"))
+
+    bad = tools.write_workspace_file("../bad.txt", "nope")
+    unavailable = tools.web_search("Agentic LLM benchmarks")
+
+    assert bad["ok"] is False
+    assert "Path traversal" in bad["error"]
+    assert unavailable["ok"] is False
+    assert "web_search unavailable" in unavailable["error"]
+
+
+def test_cubepi_artifact_writer_validates_schema(tmp_path: Path) -> None:
+    workspace = prepare_workspace(tmp_path / "workspace")
+    tools = CubePiWorkspaceTools(workspace, DiscoveryContext(workspace_path=str(workspace), domain="ai_index"))
+
+    rejected = tools.write_insight_candidate({"insight_id": "missing_fields"})
+    accepted = tools.write_insight_candidate(
+        {
+            "insight_id": "ins_001",
+            "title": "Valid insight",
+            "thesis": "A valid thesis.",
+            "why_now": "Now.",
+            "analysis_artifacts": ["scripts/a.py"],
+            "counterarguments": ["Small sample."],
+            "confidence": 0.5,
+        }
+    )
+
+    assert rejected["ok"] is False
+    assert accepted["ok"] is True
+    data = json.loads((workspace / "insights" / "insight_candidates.json").read_text(encoding="utf-8"))
+    assert data["insight_candidates"][0]["insight_id"] == "ins_001"
+
+
+def test_cubepi_dry_run_workflow_writes_artifacts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATAELF_CUBEPI_DRY_RUN", "1")
+    config = DataElfConfig(
+        workspace_dir=tmp_path / ".dataelf",
+        sqlite_path=tmp_path / ".dataelf" / "dataelf.sqlite",
+        raw_dir=tmp_path / ".dataelf" / "raw",
+        workspaces_dir=tmp_path / ".dataelf" / "workspaces",
+        fixtures_dir=Path("fixtures/ai_index"),
+        ai_index_mode="fixture",
+        insights_explorer="cubepi",
+        cubepi_dry_run=True,
+    )
+
+    job = run_discovery("围绕 Agentic LLMs，发现 1 个 insight", config)
+
+    workspace = Path(job.workspace_path)
+    assert job.status == "completed"
+    assert (workspace / "logs" / "cubepi_events.jsonl").exists()
+    assert (workspace / "insights" / "insight_candidates.json").exists()
+    assert job.insight_candidate_ids == ["ins_cubepi_dry_run_001"]
 
 
 def test_discovery_workflow_can_use_sqlite_when_enabled(tmp_path: Path, monkeypatch) -> None:

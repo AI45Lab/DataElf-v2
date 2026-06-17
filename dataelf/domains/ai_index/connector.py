@@ -86,7 +86,7 @@ class AIIndexConnector:
             req = request.Request(url, data=body, headers=headers, method=method)
             try:
                 with request.urlopen(req, timeout=self.timeout_seconds) as response:
-                    raw = json.loads(response.read().decode("utf-8"))
+                    raw = json.loads(response.read().decode("utf-8", errors="replace"))
                     return self._wrap(method, endpoint, payload, raw)
             except error.HTTPError as exc:
                 last_error = exc
