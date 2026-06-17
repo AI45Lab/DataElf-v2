@@ -220,11 +220,26 @@ Each final insight must include:
 - confidence
 - next_questions
 
+Do not make all final insights trend or shift narratives. A trend is only one possible insight form.
+
+Final insights should cover at least two of these insight forms:
+
+- mechanism insight: explain why a pattern is happening or what system mechanism creates it
+- structural relationship insight: connect entity types, such as Paper + Institution + Benchmark, in a non-obvious way
+- anomaly insight: identify an entity or cluster that behaves differently from the baseline
+- opportunity or risk insight: identify a strategic opening, bottleneck, or failure mode
+- contradiction or tension insight: show where AI Index data and external signals disagree or create uncertainty
+- ecosystem gap insight: identify a missing benchmark, missing infrastructure, missing institution, or under-served niche
+- trend or timing insight: explain what is emerging, accelerating, fragmenting, or shifting
+
 ## Hard Rules
 
 - Do not output simple top-N rankings as insights.
 - Do not output generic summaries.
 - Do not merely restate API fields.
+- Do not make every final insight a "正在转向 / is shifting / is becoming / is emerging" trend claim.
+- At most one final insight should be primarily a trend/trajectory claim unless the data strongly justifies more.
+- Prefer titles that state a mechanism, anomaly, tension, gap, or strategic implication, not only a direction of change.
 - Prefer `tables/*.csv` for quantitative analysis.
 - Use `raw/ai_index/` only to inspect original details missing from tables.
 - At least two final insights should be supported by Python analysis artifacts.
