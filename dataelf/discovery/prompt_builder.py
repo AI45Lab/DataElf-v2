@@ -80,8 +80,30 @@ Available methods:
 
 Do not call the AI Index HTTP API directly. Use `AIIndexClient`.
 
-Save raw responses under `raw/ai_index/`.
-Save derived or normalized tables under `tables/`.
+`search_*` and `fetch_institution_funding` automatically save raw responses under `raw/ai_index/` and update normalized CSV tables under `tables/`.
+
+Important execution guidance for this CLI runner:
+
+- You may fetch broad AI Index data when it is useful for insight discovery.
+- Prefer progressive acquisition: fetch a batch, write raw/tables/notes, summarize what changed, then decide the next batch.
+- Do not print raw API responses, full dataframes, or long CSV contents to stdout.
+- Write large details to `notes/`, `tables/`, or `raw/`; print only compact summaries from scripts.
+- If a script or model step fails after a large batch, retry with smaller batches and summarize intermediate files instead of abandoning the task.
+
+Use `save_raw(...)` only for custom responses not already saved by `search_*`.
+Use `save_table(...)` only for derived analysis tables you create.
+
+## DeepAgentsCode Subagents
+
+Project subagent shells are available under `.deepagents/agents/`:
+
+- `breadth-scout`: broad AI Index and local table scan; generate candidate signal coverage.
+- `code-analyst`: Python analysis, joins, aggregations, anomaly detection, and derived tables.
+- `web-investigator`: external web_search / fetch_url investigation.
+- `skeptic`: challenge evidence, low-base effects, obviousness, and alternative explanations.
+- `insight-synthesizer`: produce final insight_candidates.json and final_brief.md.
+
+Use the DeepAgentsCode `task` tool to delegate when helpful. In particular, delegate the first broad/starter scan to `breadth-scout` rather than doing all acquisition in the main agent context. Subagents should write findings to workspace files and return concise summaries to the main agent.
 
 ## External Web Search
 

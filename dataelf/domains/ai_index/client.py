@@ -14,6 +14,9 @@ class AIIndexClient:
     def __init__(self, connector: AIIndexConnector, workspace_path: Path | None = None):
         self.connector = connector
         self.workspace_path = workspace_path
+        self.max_calls = _env_int("DATAELF_AI_INDEX_MAX_CALLS")
+        self.max_page_size = _env_int("DATAELF_AI_INDEX_MAX_PAGE_SIZE")
+        self._call_count = 0
 
     @classmethod
     def from_env(cls, workspace_path: str | Path | None = None) -> "AIIndexClient":
@@ -30,21 +33,25 @@ class AIIndexClient:
         return cls(connector=connector, workspace_path=path)
 
     def search_papers(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs = self._bounded_kwargs("search_papers", kwargs)
         response = self.connector.search_papers(**kwargs)
         self._update_tables(response)
         return response
 
     def search_institutions(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs = self._bounded_kwargs("search_institutions", kwargs)
         response = self.connector.search_institutions(**kwargs)
         self._update_tables(response)
         return response
 
     def search_scholars(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs = self._bounded_kwargs("search_scholars", kwargs)
         response = self.connector.search_scholars(**kwargs)
         self._update_tables(response)
         return response
 
     def fetch_institution_funding(self, institution_id: str) -> dict[str, Any]:
+        self._register_call("fetch_institution_funding")
         response = self.connector.fetch_institution_funding(institution_id)
         self._update_tables(response)
         return response
@@ -112,6 +119,25 @@ class AIIndexClient:
         if self.workspace_path is not None:
             update_tables_from_response(self.workspace_path, response)
 
+    def _bounded_kwargs(self, method_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        self._register_call(method_name)
+        bounded = dict(kwargs)
+        if self.max_page_size is not None:
+            try:
+                requested = int(bounded.get("size", self.max_page_size))
+            except (TypeError, ValueError):
+                requested = self.max_page_size
+            bounded["size"] = max(1, min(requested, self.max_page_size))
+        return bounded
+
+    def _register_call(self, method_name: str) -> None:
+        self._call_count += 1
+        if self.max_calls is not None and self._call_count > self.max_calls:
+            raise RuntimeError(
+                f"AI Index call budget exceeded in {method_name}: "
+                f"{self._call_count}/{self.max_calls}. Narrow the query or analyze existing workspace tables first."
+            )
+
 
 def _rows_from_data(data: Any) -> list[dict[str, Any]]:
     if hasattr(data, "to_dict"):
@@ -119,3 +145,14 @@ def _rows_from_data(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return [dict(row) for row in data]
     raise TypeError("save_table expects a pandas DataFrame or list[dict].")
+
+
+def _env_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
