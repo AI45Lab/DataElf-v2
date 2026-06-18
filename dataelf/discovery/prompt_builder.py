@@ -26,77 +26,43 @@ def build_discovery_prompt(job: DiscoveryJob, context: DiscoveryContext) -> str:
 
 
 def _build_dcode_tool_appendix() -> str:
-    return """### DeepAgentsCode CLI Runtime
+    return """### DeepAgentsCode Runtime
 
-You are running inside the DataElf job workspace through the DeepAgentsCode CLI runner.
+Run inside the job workspace. Use dcode native file/shell/web tools, but keep tool outputs compact.
 
-Use DeepAgentsCode's native tools to inspect files, write files, execute Python/shell commands, and search/fetch the web.
+Important dcode stability rules:
 
-### AI Index Access
+- Do not call `write_todos`; write plans to `notes/research_plan.md` instead.
+- Use exactly one tool call per assistant turn. Do not fan out parallel `ls`, `read_file`, `glob`, `execute`, web, or task calls.
+- Do not use `read_file` on CSV tables or raw JSON. Use Python to print compact `{table, columns, row_count}` summaries.
+- Avoid large parallel tool batches. Prefer one compact script, then decide.
+- Do not print raw API responses, full dataframes, or long CSV contents.
 
-When you need AI Index data, write Python scripts under `scripts/` and import:
+### AI Index
+
+Use Python scripts under `scripts/`:
 
 ```python
 from dataelf.domains.ai_index.client import AIIndexClient
-
 client = AIIndexClient.from_env()
 ```
 
-Available SDK methods:
+Available methods: `search_papers`, `search_institutions`, `search_scholars`, `fetch_institution_funding`, `save_raw`, `save_table`.
 
-- `search_papers(...)`
-- `search_institutions(...)`
-- `search_scholars(...)`
-- `fetch_institution_funding(...)`
-- `save_raw(name, response, workspace_path=None)`
-- `save_table(table_name, rows, workspace_path=None)`
-
-`search_*` and `fetch_institution_funding` automatically save raw responses under `raw/ai_index/` and update normalized CSV tables under `tables/`.
-
-Use `save_raw(...)` only for custom responses not already saved by `search_*`.
-Use `save_table(...)` only for derived analysis tables you create.
-
-### Python And Files
-
-- Write Python scripts under `scripts/`.
-- Run scripts from the workspace.
-- Return compact summaries from scripts.
-- Write large details to `notes/`, `tables/`, `deep_dives/`, or `raw/`.
-- Do not print raw API responses, full dataframes, or long CSV contents.
-- If a script or model step fails after a large batch, retry with smaller batches and summarize intermediate files instead of abandoning the task.
+`search_*` and `fetch_institution_funding` automatically save raw responses under `raw/ai_index/` and update `tables/*.csv`.
 
 ### External Web
 
-Use DeepAgentsCode `web_search` and `fetch_url` when useful.
+Use DeepAgentsCode `web_search` and `fetch_url` when useful. Save external observations to `tables/source_observations.csv`, `tables/external_findings.csv`, and `raw/web/`.
 
-External search should explain, validate, or challenge AI Index signals. Look for benchmark leaderboards, GitHub repositories, project pages, arXiv or paper pages, institution announcements, technical blogs, funding/news events, datasets, and benchmark pages.
+### Artifacts
 
-Write external observations to:
-
-- `tables/source_observations.csv`
-- `tables/external_findings.csv`
-- `raw/web/`
-
-If web search is unavailable, say so explicitly in the final brief.
-
-### Artifact Writing
-
-Write final artifacts directly to:
+Write valid JSON/Markdown directly to:
 
 - `insights/candidate_signals.json`
 - `insights/insight_candidates.json`
 - `insights/final_brief.md`
 
-Make sure the JSON files are valid JSON and match the common schemas.
+### Subagents
 
-### DeepAgentsCode Subagents
-
-Project subagent shells are available under `.deepagents/agents/`:
-
-- `breadth-scout`: broad AI Index and local table scan; generate candidate signal coverage.
-- `code-analyst`: Python analysis, joins, aggregations, anomaly detection, and derived tables.
-- `web-investigator`: external web_search / fetch_url investigation.
-- `skeptic`: challenge evidence, low-base effects, obviousness, and alternative explanations.
-- `insight-synthesizer`: produce final `insight_candidates.json` and `final_brief.md`.
-
-These subagents are backend capabilities, not the common discovery method. Do not make `task` delegation a required first step. First inspect the workspace and proceed in the main agent context. Use the DeepAgentsCode `task` tool only if it is clearly available and stable in the current run. If `task` delegation fails or appears unstable, continue in the main agent context and write concise role-specific notes under `notes/` instead."""
+`.deepagents/agents/` contains role shells. They are optional backend capabilities. Do not make `task` delegation the first required step; use it only if stable, otherwise continue in the main agent context."""
